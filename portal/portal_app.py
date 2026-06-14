@@ -50,7 +50,6 @@ INDUSTRIAL_PORT = env_port("INDUSTRIAL_PORT", 8000, "INDUSTRIAL_WEB_PORT")
 API_STUDIO_PORT = env_port("API_STUDIO_PORT", 5050, "PORT")
 OPCUA_PORT = env_port("OPCUA_PORT", 4840)
 MQTT_BROKER_PORT = env_port("MQTT_BROKER_PORT", 1883, "MQTT_PORT")
-ACM_PORT = env_port("ACM_PORT", 8765)
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 DATA_DIR = ROOT / "portal" / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -182,7 +181,6 @@ def page() -> str:
             "opcua_port": OPCUA_PORT,
             "mqtt_port": MQTT_BROKER_PORT,
             "mqtt_host": "localhost",
-            "acm_port": ACM_PORT,
             "lan_ip": local_ip(),
         }
         config_script = (
@@ -200,7 +198,6 @@ def page() -> str:
             'id="lpIndustrial" value="8000"': f'id="lpIndustrial" value="{INDUSTRIAL_PORT}"',
             'id="lpOpcua" value="4840"': f'id="lpOpcua" value="{OPCUA_PORT}"',
             'id="lpMqtt" value="1883"': f'id="lpMqtt" value="{MQTT_BROKER_PORT}"',
-            'id="lpAcm" value="8765"': f'id="lpAcm" value="{ACM_PORT}"',
             'id="mqttPort" type="number" value="1883"': f'id="mqttPort" type="number" value="{MQTT_BROKER_PORT}"',
             'id="opcuaEndpoint" value="opc.tcp://localhost:4840/simulator"': f'id="opcuaEndpoint" value="opc.tcp://localhost:{OPCUA_PORT}/simulator"',
         }
@@ -295,13 +292,6 @@ refreshStatus = async function() {
 
   const industrialOk = !!(suite.industrial && suite.industrial.ok);
   const apiOk = !!(suite.api_studio && suite.api_studio.ok);
-  const acmOk = !!(suite.acm && suite.acm.ok);
-  const acmPort = window.SIMULATOR_LAUNCHER_CONFIG && window.SIMULATOR_LAUNCHER_CONFIG.acm_port || 8765;
-  const scAcm = $('sc-acm');
-  if (scAcm) {
-    scAcm.querySelector('.val').textContent = acmOk ? 'online' : 'offline';
-    scAcm.className = 'sc-item' + (acmOk ? ' ok' : ' warn');
-  }
 
   if (!industrialOk) {
     __ipsIndustrialReady = false;
@@ -386,7 +376,6 @@ class Handler(BaseHTTPRequestHandler):
                 "portal": {"ok": True, "port": PORT},
                 "industrial": get_service(f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/health"),
                 "api_studio": get_service(f"http://127.0.0.1:{API_STUDIO_PORT}/api/studio/health"),
-                "acm": get_service(f"http://127.0.0.1:{ACM_PORT}/health"),
             })
         if path == "/launcher/config":
             return json_response(self, 200, suite_status_payload(suite_load_ports()))
@@ -467,7 +456,6 @@ def main() -> None:
     print(f"Portal: http://127.0.0.1:{PORT}")
     print(f"Industrial simulator: http://127.0.0.1:{INDUSTRIAL_PORT}")
     print(f"API Studio: http://127.0.0.1:{API_STUDIO_PORT}")
-    print(f"ACM: http://127.0.0.1:{ACM_PORT}")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

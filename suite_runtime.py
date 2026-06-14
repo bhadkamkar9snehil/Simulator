@@ -32,14 +32,12 @@ WHEELHOUSE_CONSTRAINTS = WHEELS_DIR / "wheelhouse_constraints.txt"
 REQUIREMENTS_FILE = ROOT / "requirements.txt"
 BOOTSTRAP_STATE = VENV_DIR / ".bootstrap_state.json"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-ACM_DIR = ROOT.parent / "ACM"
 DEFAULT_PORTS = {
     "industrial_web_port": "8000",
     "api_studio_port": "5050",
     "portal_port": "8001",
     "opcua_port": "4840",
     "mqtt_broker_port": "1883",
-    "acm_port": "8765",
 }
 ENV_PORT_MAP = {
     "industrial_web_port": "INDUSTRIAL_WEB_PORT",
@@ -47,7 +45,6 @@ ENV_PORT_MAP = {
     "portal_port": "PORTAL_PORT",
     "opcua_port": "OPCUA_PORT",
     "mqtt_broker_port": "MQTT_BROKER_PORT",
-    "acm_port": "ACM_PORT",
 }
 
 processes: dict[str, subprocess.Popen] = {}
@@ -158,7 +155,6 @@ def save_ports(ports: dict[str, str]) -> None:
     lines.append(f'set "PORTAL_PORT={ports["portal_port"]}"')
     lines.append(f'set "OPCUA_PORT={ports["opcua_port"]}"')
     lines.append(f'set "MQTT_BROKER_PORT={ports["mqtt_broker_port"]}"')
-    lines.append(f'set "ACM_PORT={ports.get("acm_port", DEFAULT_PORTS["acm_port"])}"')
     PORTS_BAT.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
 
 
@@ -646,17 +642,6 @@ def start_services(
     ok3 = True
     if include_portal:
         ok3 = start_service("Portal", [service_py, "portal/portal_app.py"], ROOT, env)
-    # ACM is optional: launch only when the sibling repo exists.
-    if ACM_DIR.exists() and (ACM_DIR / "scripts" / "acm_service.py").exists():
-        acm_env = dict(env)
-        acm_env["ACM_PORT"] = str(ports.get("acm_port", DEFAULT_PORTS["acm_port"]))
-        start_service(
-            "ACM",
-            [service_py, "scripts/acm_service.py", "--host", "0.0.0.0",
-             "--port", ports.get("acm_port", DEFAULT_PORTS["acm_port"])],
-            ACM_DIR,
-            acm_env,
-        )
     time.sleep(1.5)
     if open_browser_flag:
         open_app_window(f"http://localhost:{ports['portal_port']}")
@@ -709,7 +694,7 @@ def stop_by_saved_pids(include_portal: bool = True) -> None:
 def stop_by_ports(ports: dict[str, str], include_portal: bool = True) -> None:
     if os.name != "nt":
         return
-    target_keys = ["industrial_web_port", "api_studio_port", "opcua_port", "mqtt_broker_port", "acm_port"]
+    target_keys = ["industrial_web_port", "api_studio_port", "opcua_port", "mqtt_broker_port"]
     if include_portal:
         target_keys.append("portal_port")
     targets = {str(ports[key]) for key in target_keys if key in ports}
@@ -752,7 +737,6 @@ def urls_for(ports: dict[str, str]) -> dict[str, str]:
         "api_studio": f"http://localhost:{ports['api_studio_port']}",
         "opcua": f"opc.tcp://localhost:{ports['opcua_port']}/simulator",
         "mqtt": f"localhost:{ports['mqtt_broker_port']}",
-        "acm": f"http://localhost:{ports.get('acm_port', DEFAULT_PORTS['acm_port'])}",
     }
 
 
@@ -764,7 +748,6 @@ def status_payload(ports: dict[str, str]) -> dict:
         ("portal", "portal_port"),
         ("opcua", "opcua_port"),
         ("mqtt", "mqtt_broker_port"),
-        ("acm", "acm_port"),
     ]:
         try:
             flags[label] = is_port_listening(int(ports[key]))

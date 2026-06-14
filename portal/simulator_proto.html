@@ -568,7 +568,6 @@ body[data-proto="both"]  .proto-mqtt { display: block; }
     <div class="stat-cell" id="sc-cursor"><span class="lbl">Cursor</span><span class="val">0/0</span></div>
     <div class="stat-cell" id="sc-tags"><span class="lbl">Tags</span><span class="val">0</span></div>
     <div class="stat-cell" id="sc-endpoint" style="min-width:130px"><span class="lbl">Endpoint</span><span class="val" style="font-size:9px">-</span></div>
-    <div class="stat-cell" id="sc-acm" title="Asset Condition Monitor — click to open"><span class="lbl"><a id="acmLink" href="#" target="_blank" style="color:inherit;text-decoration:none">ACM</a></span><span class="val">offline</span></div>
   </div>
 
   <div class="hdr-right">
@@ -906,7 +905,6 @@ body[data-proto="both"]  .proto-mqtt { display: block; }
             <div class="fg-item"><span class="lbl">Portal</span><input id="lpPortal" value="8001"/></div>
             <div class="fg-item"><span class="lbl">OPC UA Server</span><input id="lpOpcua" value="4840"/></div>
             <div class="fg-item"><span class="lbl">MQTT Broker</span><input id="lpMqtt" value="1883"/></div>
-            <div class="fg-item"><span class="lbl">ACM</span><input id="lpAcm" value="8765"/></div>
           </div>
           <div class="row" style="margin-top:10px">
             <button class="btn btn-brand btn-sm" id="savePorts">Save Ports</button>
@@ -1483,8 +1481,7 @@ $('saveMappingBtn').addEventListener('click', () => saveMapping().catch(e=>msg(e
 // ── Launch / Control ──────────────────────────────────────
 function launchPorts() {
   return {industrial_web_port:$('lpIndustrial').value, api_studio_port:$('lpApi').value,
-    portal_port:$('lpPortal').value, opcua_port:$('lpOpcua').value, mqtt_broker_port:$('lpMqtt').value,
-    acm_port:$('lpAcm').value};
+    portal_port:$('lpPortal').value, opcua_port:$('lpOpcua').value, mqtt_broker_port:$('lpMqtt').value};
 }
 function applyLaunchData(d) {
   const p = d.ports||{};
@@ -1493,15 +1490,13 @@ function applyLaunchData(d) {
   if(p.portal_port)         $('lpPortal').value=p.portal_port;
   if(p.opcua_port)          $('lpOpcua').value=p.opcua_port;
   if(p.mqtt_broker_port)    $('lpMqtt').value=p.mqtt_broker_port;
-  if(p.acm_port)            $('lpAcm').value=p.acm_port;
   const st = d.status||{};
   $('launchStatusKv').innerHTML = Object.entries(st).map(([k,v])=>`<div class="kv-cell ${v?'ok':'bad'}"><div class="k">${esc(k)}</div><div class="v">${v?'ON':'OFF'}</div></div>`).join('');
   const u = d.urls||{};
-  $('launchUrls').textContent = `Portal:      ${u.portal||'—'}\nIndustrial:  ${u.industrial||'—'}\nAPI Studio:  ${u.api_studio||'—'}\nOPC UA:      ${u.opcua||'—'}\nMQTT:        ${u.mqtt||'—'}\nACM:         ${u.acm||'—'}`;
+  $('launchUrls').textContent = `Portal:      ${u.portal||'—'}\nIndustrial:  ${u.industrial||'—'}\nAPI Studio:  ${u.api_studio||'—'}\nOPC UA:      ${u.opcua||'—'}\nMQTT:        ${u.mqtt||'—'}`;
   if(u.portal)    $('openPortal').href = u.portal;
   if(u.api_studio) $('openApi').href   = u.api_studio;
   if(u.api_studio) { $('apiFrame').src = u.api_studio; $('openApiStudio').href = u.api_studio; }
-  if(u.acm) { const al = $('acmLink'); if(al) al.href = u.acm; }
 }
 async function loadLaunchStatus() {
   const d = await api('/launcher/config'); applyLaunchData(d);
