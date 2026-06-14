@@ -1,0 +1,6 @@
+{
+  "assetCode": "CCM_01",
+  "downtimeMinutes": 22,
+  "reason": "Mould level fluctuation",
+  "sourceSystem": "MES"
+}

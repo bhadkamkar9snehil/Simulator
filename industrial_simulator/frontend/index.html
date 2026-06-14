@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OPC UA/MQTT/API Simulator</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-block">
+      <div class="eyebrow">OPC UA | MQTT | API</div>
+      <h1>OPC UA/MQTT/API Simulator</h1>
+      <p>Protocol replay, live values, file plans, and industrial tag simulation.</p>
+    </div>
+    <div class="status-grid" id="statusGrid">
+      <div><span>Backend</span><strong id="backendStatus">?</strong></div>
+      <div><span>OPC UA</span><strong id="opcStatus">?</strong></div>
+      <div><span>MQTT</span><strong id="mqttStatus">?</strong></div>
+      <div><span>Endpoint</span><strong class="mono" id="opcEndpoint">-</strong></div>
+      <div><span>Replay</span><strong id="simState">idle</strong></div>
+      <div><span>Files</span><strong id="loadedCsv">-</strong></div>
+      <div><span>Cursor</span><strong id="cursorStatus">0 / 0</strong></div>
+      <div><span>Hz</span><strong id="freqStatus">-</strong></div>
+      <div><span>Tags</span><strong id="tagStatus">0</strong></div>
+    </div>
+    <div class="quick-actions">
+      <button id="refreshStatusBtn">Refresh</button>
+      <button id="quickStopBtn" class="danger">Stop</button>
+      <button id="quickRestartBtn">Restart</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="messageArea" class="message hidden"></div>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="generate">1. Generate Data</button>
+      <button class="tab" data-tab="files">2. Files / Assignment</button>
+      <button class="tab" data-tab="replay">3. Replay OPC UA / MQTT</button>
+      <button class="tab" data-tab="configs">4. Configs / Status</button>
+    </nav>
+
+    <section id="tab-generate" class="panel active">
+      <div class="panel-header"><h2>Generate Domain Data</h2><p>Original OPC UA data generators are preserved. Generate CSV and optionally load it into manual replay mapping.</p></div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Generator</h3>
+          <label>Domain<select id="domainSelect"></select></label>
+          <label>Scenario<select id="scenarioSelect"></select></label>
+          <label>Output Filename<input id="outputFilename" type="text" placeholder="pipeline_small_leak.csv" /></label>
+          <div id="generatorDescription" class="hint"></div>
+        </div>
+        <div class="card">
+          <h3>Parameters</h3>
+          <div id="parameterForm" class="form-grid"></div>
+        </div>
+      </div>
+      <div class="action-row">
+        <button id="generateBtn" class="primary">Generate CSV</button>
+        <button id="generateLoadBtn">Generate and Load into Manual Replay</button>
+        <button id="resetParamsBtn">Reset Parameters</button>
+      </div>
+      <div class="card">
+        <h3>Generation Result</h3>
+        <div id="generationSummary" class="kv-line">No file generated yet.</div>
+        <div id="generationPreview" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <section id="tab-files" class="panel">
+      <div class="panel-header"><h2>CSV / XLSX Files and Protocol Plans</h2><p>Upload, preview, load, delete, or assign files. Shared files feed both protocols in BOTH mode; OPC UA Plan and MQTT Plan let each protocol replay a different file set.</p></div>
+      <div class="card">
+        <h3>Upload CSV/XLSX</h3>
+        <div class="inline-form"><input id="uploadInput" type="file" accept=".csv,.xlsx" multiple /><button id="uploadBtn">Upload</button><button id="refreshFilesBtn">Refresh Files</button></div>
+      </div>
+      <div class="card">
+        <h3>Available Files</h3>
+        <div id="filesTable" class="table-wrap"></div>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Selected File Preview</h3>
+          <div id="filePreviewMeta" class="kv-line">No file selected.</div>
+          <div id="filePreview" class="table-wrap"></div>
+        </div>
+        <div class="card">
+          <h3>Selected Plans</h3>
+          <div class="kv-table">
+            <div><span>Shared / Both</span><strong id="sharedAssignment">-</strong></div>
+            <div><span>OPC UA Plan</span><strong id="opcAssignment">-</strong></div>
+            <div><span>MQTT Plan</span><strong id="mqttAssignment">-</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-replay" class="panel">
+      <div class="panel-header"><h2>Replay over OPC UA, MQTT, or Both</h2><p>Use automatic multi-file assignment, or load one file and edit its tag mapping manually.</p></div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Protocol Mode</h3>
+          <div class="form-grid compact">
+            <label>Protocol<select id="protocolMode"><option value="opcua">OPC UA only</option><option value="mqtt">MQTT only</option><option value="both">OPC UA + MQTT together</option></select></label>
+            <label>Frequency Hz<input id="frequencyHz" type="number" value="1" min="0.1" step="0.1" /></label>
+            <label>Loop Mode<select id="loopMode"><option>loop_forever</option><option>once</option><option>hold_last</option><option>ping_pong</option></select></label>
+            <label>Timestamp Mode<select id="timestampMode"><option>wall_clock</option><option>csv_timestamp_ignore_rate</option><option>relative_from_csv</option></select></label>
+            <label>Start Row<input id="startRow" type="number" value="0" min="0" /></label>
+            <label>Max Rows<input id="maxRows" type="number" placeholder="optional" min="1" /></label>
+          </div>
+        </div>
+        <div class="card" id="opcCard">
+          <h3>OPC UA Settings</h3>
+          <div class="form-grid compact">
+            <label>Namespace URI<input id="namespaceUri" type="text" value="http://local/industrial-tag-simulator" /></label>
+            <label>Root Folder<input id="rootFolder" type="text" value="TagSimulator" /></label>
+            <label>Node ID Prefix<input id="nodePrefix" type="text" value="TagSimulator" /></label>
+            <label>OPC UA Endpoint<input id="opcuaEndpointDisplay" type="text" value="opc.tcp://localhost:4840/simulator" readonly /></label>
+          </div>
+        </div>
+        <div class="card" id="mqttCard">
+          <h3>MQTT Settings</h3>
+          <div class="form-grid compact">
+            <label>Host<input id="mqttHost" type="text" value="localhost" /></label>
+            <label>Port<input id="mqttPort" type="number" value="1883" min="1" max="65535" /></label>
+            <label>Topic Prefix<input id="mqttTopicPrefix" type="text" value="industrial-tag-simulator" /></label>
+            <label>Device ID<input id="mqttDeviceId" type="text" value="FlowMeter01" /></label>
+            <label>Client ID<input id="mqttClientId" type="text" value="industrial-tag-simulator" /></label>
+            <label>Username<input id="mqttUsername" type="text" placeholder="optional" /></label>
+            <label>Password<input id="mqttPassword" type="password" placeholder="optional" /></label>
+            <label>QoS<select id="mqttQos"><option>0</option><option>1</option><option>2</option></select></label>
+            <label class="checkbox-line"><input id="mqttRetain" type="checkbox" /> Retain messages</label>
+            <label class="checkbox-line"><input id="publishIndividualTags" type="checkbox" checked /> Individual tag topics</label>
+            <label class="checkbox-line"><input id="publishAggregate" type="checkbox" checked /> Aggregate /all topics</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Protocol Plan Replay</h3>
+        <p class="hint">Use the checkboxes in Files / Assignment to choose separate OPC UA files and MQTT files. Build the tag preview first, check/uncheck the tags you want, then apply the protocol plans. Start will run only the selected tags.</p>
+        <div class="action-row">
+          <button id="previewTagPlanBtn">Build / Refresh Tag Preview</button>
+          <button id="applyMultiReplayBtn" class="primary">Apply Selected Protocol Plans</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Selected / Unselected Tags Before Start</h3>
+        <p class="hint">This preview is separated by protocol. Tags under Will Run are selected. Tags under Not Run / Unselected will not be published to MQTT or exposed in OPC UA.</p>
+        <div class="action-row">
+          <button id="selectAllOpcuaTagsBtn">Select All OPC UA Tags</button>
+          <button id="clearOpcuaTagsBtn">Clear OPC UA Tags</button>
+          <button id="selectAllMqttTagsBtn">Select All MQTT Tags</button>
+          <button id="clearMqttTagsBtn">Clear MQTT Tags</button>
+        </div>
+        <div id="tagPlanSummary" class="kv-line">No tag preview built yet.</div>
+        <div id="protocolTagPlan" class="tag-plan-grid"></div>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>Manual Single-File Replay</h3>
+          <div class="kv-table">
+            <div><span>Filename</span><strong id="replayCsvName">-</strong></div>
+            <div><span>Source</span><strong id="replayCsvSource">-</strong></div>
+            <div><span>Rows</span><strong id="replayRows">0</strong></div>
+            <div><span>Columns</span><strong id="replayCols">0</strong></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Manual Mapping Controls — Optional</h3>
+          <div class="action-row"><button id="autoMapBtn">Auto-map Tags</button><button id="disableLabelsBtn">Disable Label Columns</button><button id="enableAllBtn">Enable All</button><button id="disableAllBtn">Disable All</button></div>
+          <p class="hint">Manual mapping applies only to one file loaded with the Load Manual button. For different OPC UA/MQTT file sets, use Protocol Plan Replay above.</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Tag Mapping</h3></div>
+        <div id="mappingTable" class="table-wrap"></div>
+      </div>
+      <div class="action-row">
+        <button id="applyReplayBtn">Apply Manual Single-File Config</button>
+        <button id="startReplayBtn" class="start">Start</button>
+        <button id="stopReplayBtn" class="danger">Stop</button>
+        <button id="restartReplayBtn">Restart</button>
+        <button id="resetCursorBtn">Reset Cursor</button>
+      </div>
+      <div class="card">
+        <h3>Current Values</h3>
+        <div id="currentValues" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <section id="tab-configs" class="panel">
+      <div class="panel-header"><h2>Configs / Status</h2><p>Save and reload generator + CSV + replay setups. Runtime status shows OPC UA and MQTT details.</p></div>
+      <div class="grid two">
+        <div class="card">
+          <h3>Save Current Config</h3>
+          <label>Config Name<input id="configName" type="text" placeholder="pipeline-small-leak-demo" /></label>
+          <label>Description<textarea id="configDescription" rows="3"></textarea></label>
+          <div class="action-row"><button id="saveConfigBtn" class="primary">Save Current Config</button><button id="exportConfigBtn">Export JSON</button><button id="importConfigBtn">Import JSON</button><input id="importConfigInput" class="hidden" type="file" accept=".json" /></div>
+        </div>
+        <div class="card">
+          <h3>Runtime Status</h3>
+          <pre id="rawStatus" class="status-pre">{}</pre>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Saved Configs</h3>
+        <div id="configsTable" class="table-wrap"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/launcher-config.js?v=ports"></script>
+  <script src="/static/app.js?v=8-port-selection"></script>
+</body>
+</html>

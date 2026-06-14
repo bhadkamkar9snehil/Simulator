@@ -1,0 +1,26 @@
+MQTT /all aggregate payload update
+
+The MQTT aggregate topic now publishes the requested device-envelope JSON shape:
+
+{
+  "timestamp": "2026-05-28T10:15:30Z",
+  "deviceId": "FlowMeter01",
+  "data": [
+    {"tag": "Flow", "value": 1200, "unit": "LPH", "quality": "GOOD"},
+    {"tag": "Pressure", "value": 2.3, "unit": "Bar", "quality": "GOOD"}
+  ]
+}
+
+Where to configure:
+- Open the simulator web UI.
+- Go to Simulations / Tags.
+- In MQTT Settings, set Device ID. Default is FlowMeter01.
+- Keep Aggregate /all topics checked.
+- Subscribe to: <mqtt_topic_prefix>/all
+
+Notes:
+- The tag field uses the original CSV/XLSX column name, not the prefixed internal node id.
+- Unit and quality can come from CSV columns such as Flow_unit, Flow_quality, Pressure_unit, Pressure_quality, unit, or quality.
+- If unit is missing, common units are inferred for names like Flow, Pressure, Temperature, Level, Speed, etc.
+- If quality is missing, it defaults to GOOD.
+- Existing /flat and /streampipes topics are still published for flat-field consumers.

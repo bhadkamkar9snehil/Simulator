@@ -1,0 +1,7 @@
+{
+  "python_exe": "runtime/python/python.exe",
+  "pythonw_exe": "runtime/python/pythonw.exe",
+  "python_version": "3.14.4",
+  "python_tag": "cp314",
+  "platform": "win_amd64"
+}

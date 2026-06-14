@@ -1,0 +1,6 @@
+timestamp,mqtt_flow_rate_lpm,mqtt_tank_level_pct,mqtt_valve_position_pct,mqtt_quality_code
+2026-05-15T00:00:00Z,120.5,54.0,38,OK
+2026-05-15T00:00:01Z,121.2,54.4,39,OK
+2026-05-15T00:00:02Z,119.9,54.8,37,OK
+2026-05-15T00:00:03Z,118.7,55.1,36,WARN
+2026-05-15T00:00:04Z,117.8,55.5,35,WARN

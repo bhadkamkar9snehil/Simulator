@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*/__pycache__/
+*.pyc
+launcher.log
+runtime_pids.json
+simulator_ports.bat
+simulator_ports.json
+app_window_profile/
+portal/data/
+AGENTS.md

@@ -1,0 +1,1585 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>IPS — Industrial Protocol Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&family=Share+Tech+Mono&display=swap"/>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   IPS — INDUSTRIAL PROTOCOL SIMULATOR
+   Dual-theme: light = solarised-lite / dark = forge (warm greys + amber/orange)
+   3-D bevelled buttons, boxy cards, monospace data, no border-radius on structure
+════════════════════════════════════════════════════════════ */
+
+/* ── Tokens ─────────────────────────────────────────────── */
+:root {
+  --bg:          #fdf6e3;
+  --bg2:         #eee8d5;
+  --bg3:         #e4ddc8;
+  --bg4:         #ddd6bc;
+  --ink:         #073642;
+  --ink2:        #586e75;
+  --muted:       #839496;
+  --card:        #fdf6e3;
+  --line:        #c8bf9e;
+  --line2:       #a09870;
+  --brand:       #cb4b16;
+  --brand-lo:    rgba(203,75,22,.12);
+  --brand-hi:    #dc322f;
+  --ok:          #2aa198;
+  --ok-lo:       rgba(42,161,152,.12);
+  --warn:        #b58900;
+  --warn-lo:     rgba(181,137,0,.12);
+  --bad:         #dc322f;
+  --bad-lo:      rgba(220,50,47,.12);
+  --blue:        #268bd2;
+  --blue-lo:     rgba(38,139,210,.12);
+  --term-bg:     #002b36;
+  --term-ink:    #839496;
+  --term-hi:     #eee8d5;
+  --term-ok:     #2aa198;
+  --term-warn:   #b58900;
+  --shadow-card: 0 3px 0 var(--line), 0 6px 18px rgba(7,54,66,.10);
+  --shadow-hdr:  0 4px 20px rgba(7,54,66,.22);
+
+  --btn-face:    #e2d9be;
+  --btn-hi:      #f0e8d0;
+  --btn-mid:     #cfc5a8;
+  --btn-sh:      #a09070;
+  --btn-deep:    #6e5e40;
+  --btn-3d:
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -2px 0 var(--btn-deep),
+    inset  1px 0 0 var(--btn-hi),
+    inset -1px 0 0 var(--btn-sh),
+    0 4px 8px rgba(0,0,0,.28),
+    0 1px 2px rgba(0,0,0,.18);
+  --btn-3d-press:
+    inset 0 3px 6px rgba(0,0,0,.40),
+    inset 0 1px 2px rgba(0,0,0,.25),
+    0 1px 0 rgba(255,255,255,.10);
+
+  --hdr-bg: linear-gradient(160deg, #073642 0%, #004052 55%, #005060 100%);
+  --tab-rail: #e4ddc8;
+  --tab-active: var(--brand);
+  --pill-run-bg: #d4f0e8; --pill-run-ink: #0d5c50;
+  --pill-skip-bg: #f8dcd8; --pill-skip-ink: #8c1c16;
+}
+
+[data-theme="dark"] {
+  --bg:          #1a1710;
+  --bg2:         #221f16;
+  --bg3:         #2a2620;
+  --bg4:         #332e26;
+  --ink:         #ede0c0;
+  --ink2:        #c4b090;
+  --muted:       #7a6e58;
+  --card:        #221f16;
+  --line:        #3a3428;
+  --line2:       #504838;
+  --brand:       #e8870a;
+  --brand-lo:    rgba(232,135,10,.14);
+  --brand-hi:    #ffaa33;
+  --ok:          #44c49a;
+  --ok-lo:       rgba(68,196,154,.12);
+  --warn:        #f0c040;
+  --warn-lo:     rgba(240,192,64,.12);
+  --bad:         #e05050;
+  --bad-lo:      rgba(224,80,80,.14);
+  --blue:        #5ba8e8;
+  --blue-lo:     rgba(91,168,232,.12);
+  --term-bg:     #0e0c08;
+  --term-ink:    #7a6e58;
+  --term-hi:     #ffe8a0;
+  --term-ok:     #44c49a;
+  --term-warn:   #f0c040;
+  --shadow-card: 0 3px 0 var(--line), 0 6px 24px rgba(0,0,0,.45);
+  --shadow-hdr:  0 4px 20px rgba(0,0,0,.55);
+
+  --btn-face:    #342f24;
+  --btn-hi:      #4a4436;
+  --btn-mid:     #28231a;
+  --btn-sh:      #1a1510;
+  --btn-deep:    #0c0a06;
+  --btn-3d:
+    inset 0 1px 0 var(--btn-hi),
+    inset 0 -2px 0 var(--btn-deep),
+    inset  1px 0 0 var(--btn-hi),
+    inset -1px 0 0 var(--btn-sh),
+    0 4px 10px rgba(0,0,0,.60),
+    0 1px 2px rgba(0,0,0,.40);
+  --btn-3d-press:
+    inset 0 3px 7px rgba(0,0,0,.70),
+    inset 0 1px 3px rgba(0,0,0,.50),
+    0 1px 0 rgba(255,255,255,.04);
+
+  --hdr-bg: linear-gradient(160deg, #1a1510 0%, #221d14 55%, #2a2418 100%);
+  --tab-rail: #1a1710;
+  --tab-active: var(--brand);
+  --pill-run-bg: #1a3830; --pill-run-ink: #6ee0b8;
+  --pill-skip-bg: #3a1a18; --pill-skip-ink: #e09080;
+}
+
+/* ── Reset ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { height: 100%; }
+body {
+  height: 100%; display: flex; flex-direction: column;
+  font-family: 'Barlow', sans-serif;
+  font-size: 15px; line-height: 1.5;
+  color: var(--ink); background: var(--bg);
+  overflow: hidden;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--line2) var(--bg2); }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--line2); }
+::-webkit-scrollbar-thumb:hover { background: var(--brand); }
+
+/* ── Header ─────────────────────────────────────────────── */
+.hdr {
+  flex-shrink: 0;
+  background: var(--hdr-bg);
+  box-shadow: var(--shadow-hdr);
+  border-bottom: 3px solid var(--brand);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  height: 68px;
+  /* subtle column texture */
+  background-image: var(--hdr-bg),
+    repeating-linear-gradient(90deg,transparent 0,transparent 47px,rgba(255,255,255,.025) 47px,rgba(255,255,255,.025) 48px);
+}
+.hdr-brand { display: flex; flex-direction: column; gap: 1px; }
+.hdr-brand .eyebrow {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; letter-spacing: .14em; color: rgba(255,255,255,.5);
+  text-transform: uppercase;
+}
+.hdr-brand h1 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 28px; font-weight: 900; letter-spacing: .06em;
+  text-transform: uppercase; color: #fff; line-height: 1;
+}
+.hdr-brand h1 span { color: var(--brand-hi); }
+
+/* Status strip */
+.hdr-status {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+}
+.stat-cell {
+  display: flex; flex-direction: column;
+  background: rgba(0,0,0,.28);
+  border: 1px solid rgba(255,255,255,.10);
+  padding: 5px 10px;
+  min-width: 72px;
+  clip-path: polygon(5px 0%,100% 0%,calc(100% - 5px) 100%,0% 100%);
+}
+.stat-cell .lbl {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px; letter-spacing: .10em; color: rgba(255,255,255,.44);
+  text-transform: uppercase;
+}
+.stat-cell .val {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px; font-weight: 700; color: rgba(255,255,255,.92);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stat-cell.ok  .val { color: var(--term-ok); }
+.stat-cell.bad .val { color: var(--bad); }
+.stat-cell.warn .val { color: var(--warn); }
+
+/* Header right controls */
+.hdr-right { display: flex; align-items: center; gap: 6px; }
+
+/* ── 3-D Buttons ────────────────────────────────────────── */
+.btn {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase;
+  border: 1px solid var(--line2);
+  background: var(--btn-face);
+  color: var(--ink);
+  padding: 7px 14px;
+  cursor: pointer;
+  box-shadow: var(--btn-3d);
+  position: relative; top: 0;
+  transition: top .07s, box-shadow .07s, background .10s;
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px;
+  text-decoration: none;
+}
+.btn:hover  { background: var(--btn-hi); }
+.btn:active { box-shadow: var(--btn-3d-press); top: 2px; }
+
+/* colour variants — bevel auto-derived from base hue */
+.btn-brand  { background: var(--brand);  border-color: color-mix(in srgb,var(--brand) 65%,#000 35%); color:#fff; }
+.btn-brand:hover  { background: color-mix(in srgb,var(--brand) 85%,#fff 15%); color:#fff; }
+.btn-ok     { background: var(--ok);    border-color: color-mix(in srgb,var(--ok) 65%,#000 35%);    color:#fff; }
+.btn-ok:hover     { background: color-mix(in srgb,var(--ok) 85%,#fff 15%); color:#fff; }
+.btn-bad    { background: var(--bad);   border-color: color-mix(in srgb,var(--bad) 65%,#000 35%);   color:#fff; }
+.btn-bad:hover    { background: color-mix(in srgb,var(--bad) 85%,#fff 15%); color:#fff; }
+.btn-blue   { background: var(--blue);  border-color: color-mix(in srgb,var(--blue) 65%,#000 35%);  color:#fff; }
+.btn-blue:hover   { background: color-mix(in srgb,var(--blue) 85%,#fff 15%); color:#fff; }
+.btn-warn   { background: var(--warn);  border-color: color-mix(in srgb,var(--warn) 65%,#000 35%);  color:#fff; }
+.btn-warn:hover   { background: color-mix(in srgb,var(--warn) 85%,#fff 15%); color:#fff; }
+.btn-sm     { font-size: 12px; padding: 5px 10px; }
+.btn-hdr    { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.20); color:#fff; font-size:12px; padding:6px 10px; }
+.btn-hdr:hover { background: rgba(255,255,255,.16); }
+
+/* ── Tab rail ───────────────────────────────────────────── */
+.tab-rail {
+  flex-shrink: 0;
+  display: flex; gap: 6px; align-items: flex-end;
+  padding: 10px 18px 0;
+  background: var(--tab-rail);
+  border-bottom: 2px solid var(--line);
+}
+.tab-btn {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase;
+  border: 1px solid var(--line); border-bottom: none;
+  background: var(--bg3); color: var(--ink2);
+  padding: 10px 20px 11px;
+  cursor: pointer;
+  position: relative; top: 1px;
+  transition: background .10s, color .10s;
+}
+.tab-btn:hover { background: var(--bg2); color: var(--ink); }
+.tab-btn.active {
+  background: var(--bg);
+  color: var(--brand);
+  border-color: var(--line2);
+  border-bottom-color: var(--bg);
+  z-index: 2;
+}
+.tab-btn .tab-num {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; opacity: .7; margin-right: 6px;
+}
+
+/* ── Main content area ──────────────────────────────────── */
+.main {
+  flex: 1; overflow: hidden; display: flex; flex-direction: column;
+}
+.panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+.panel.active { display: flex; }
+.panel-scroll { flex: 1; overflow-y: auto; padding: 16px 18px 20px; }
+
+/* ── Message bar ────────────────────────────────────────── */
+.msgbar {
+  flex-shrink: 0;
+  padding: 8px 18px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px; letter-spacing: .03em;
+  display: none;
+  border-top: 1px solid var(--line);
+}
+.msgbar.show  { display: block; }
+.msgbar.info  { background: var(--blue-lo);  color: var(--blue);  border-top-color: var(--blue); }
+.msgbar.ok    { background: var(--ok-lo);    color: var(--ok);    border-top-color: var(--ok); }
+.msgbar.error { background: var(--bad-lo);   color: var(--bad);   border-top-color: var(--bad); }
+.msgbar.warn  { background: var(--warn-lo);  color: var(--warn);  border-top-color: var(--warn); }
+
+/* ── Cards ──────────────────────────────────────────────── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 800; letter-spacing: .10em;
+  text-transform: uppercase; color: var(--brand);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px; margin-bottom: 10px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.card-title .ct-right { display: flex; gap: 6px; align-items: center; }
+
+/* ── Grid helpers ───────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.g24 { display: grid; grid-template-columns: 2fr 4fr; gap: 10px; }
+.g42 { display: grid; grid-template-columns: 4fr 2fr; gap: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row-end { justify-content: flex-end; }
+.col { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── Form ───────────────────────────────────────────────── */
+.lbl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink2);
+  display: block; margin-bottom: 4px;
+}
+.fld, input, select, textarea {
+  width: 100%; font-family: 'Share Tech Mono', monospace;
+  font-size: 14px; color: var(--ink);
+  background: var(--bg2); border: 1px solid var(--line);
+  padding: 8px 10px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.10);
+  outline: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--brand);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.10), 0 0 0 2px var(--brand-lo);
+}
+textarea { min-height: 70px; resize: vertical; }
+input[type="checkbox"] { width: auto; accent-color: var(--brand); }
+input[type="file"] { padding: 6px 8px; font-size: 12px; }
+input[readonly] { opacity: .6; cursor: default; }
+.fg { display: grid; gap: 6px 10px; }
+.fg-2 { grid-template-columns: 1fr 1fr; }
+.fg-3 { grid-template-columns: 1fr 1fr 1fr; }
+.fg-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.fg-item { display: flex; flex-direction: column; }
+.ck-row { display: flex; align-items: center; gap: 6px; }
+.ck-row .lbl { margin-bottom: 0; }
+
+/* ── Tables ─────────────────────────────────────────────── */
+.tbl-wrap { overflow: auto; border: 1px solid var(--line); margin-top: 6px; }
+.tbl-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
+th {
+  background: var(--bg3); color: var(--ink2);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; padding: 8px 10px;
+  border-bottom: 2px solid var(--brand);
+  position: sticky; top: 0; z-index: 1;
+  white-space: nowrap;
+}
+td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:nth-child(even) td { background: rgba(0,0,0,.03); }
+tr:hover td { background: var(--brand-lo); }
+td input, td select { min-width: 110px; padding: 5px 7px; font-size: 12px; }
+
+/* ── Terminal/pre ───────────────────────────────────────── */
+.term {
+  background: var(--term-bg); color: var(--term-ink);
+  font-family: 'Share Tech Mono', monospace; font-size: 12px;
+  line-height: 1.65; padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.06);
+  box-shadow: inset 0 3px 10px rgba(0,0,0,.55);
+  overflow: auto; white-space: pre-wrap;
+}
+.term .t-hi  { color: var(--term-hi); }
+.term .t-ok  { color: var(--term-ok); }
+.term .t-bad { color: var(--bad); }
+.term .t-w   { color: var(--term-warn); }
+
+/* ── KV grid ────────────────────────────────────────────── */
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.kv-cell {
+  background: var(--bg2); border: 1px solid var(--line);
+  padding: 5px 8px;
+}
+.kv-cell .k {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 2px;
+}
+.kv-cell .v {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px; font-weight: 700; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kv-cell.ok  .v { color: var(--ok); }
+.kv-cell.bad .v { color: var(--bad); }
+.kv-cell.warn .v { color: var(--warn); }
+
+/* ── Pills ──────────────────────────────────────────────── */
+.pill {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  padding: 3px 8px; display: inline-block;
+}
+.pill-run  { background: var(--pill-run-bg);  color: var(--pill-run-ink); }
+.pill-skip { background: var(--pill-skip-bg); color: var(--pill-skip-ink); }
+.pill-ok   { background: var(--ok-lo);  color: var(--ok); }
+.pill-bad  { background: var(--bad-lo); color: var(--bad); }
+.pill-warn { background: var(--warn-lo); color: var(--warn); }
+
+/* ── Divider ────────────────────────────────────────────── */
+.sep {
+  border: none; border-top: 1px solid var(--line);
+  margin: 10px 0;
+}
+
+/* ── Hint text ──────────────────────────────────────────── */
+.hint {
+  font-size: 13px; color: var(--muted); line-height: 1.55;
+  font-style: italic; margin: 4px 0;
+}
+
+/* ── File action row ────────────────────────────────────── */
+.file-actions { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+
+/* ── Tag plan ───────────────────────────────────────────── */
+.tag-section { border: 1px solid var(--line); background: var(--bg2); margin-bottom: 8px; }
+.tag-section-hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 10px;
+  background: var(--bg3); border-bottom: 1px solid var(--line);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink2);
+}
+.tag-section-hdr .proto-badge {
+  font-family: 'Share Tech Mono', monospace; font-size: 10px;
+  padding: 1px 7px; background: var(--brand-lo); color: var(--brand);
+  border: 1px solid var(--brand);
+}
+.tag-section-body { padding: 8px 10px; }
+
+/* ── Protocol-mode card visibility ─────────────────────── */
+.proto-opc  { display: none; }
+.proto-mqtt { display: none; }
+body[data-proto="opcua"] .proto-opc  { display: block; }
+body[data-proto="mqtt"]  .proto-mqtt { display: block; }
+body[data-proto="both"]  .proto-opc  { display: block; }
+body[data-proto="both"]  .proto-mqtt { display: block; }
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .g2, .g3, .g24, .g42, .fg-2, .fg-3, .fg-4 { grid-template-columns: 1fr; }
+  .hdr { grid-template-columns: 1fr auto; }
+  .hdr-status { display: none; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   TAB-SPECIFIC LAYOUT TWEAKS
+───────────────────────────────────────────────────────── */
+
+/* Generate — left/right split */
+#t-generate .gen-layout { display: grid; grid-template-columns: 280px 1fr; gap: 10px; }
+@media (max-width:900px) { #t-generate .gen-layout { grid-template-columns: 1fr; } }
+
+/* API Studio */
+.api-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100%;
+  gap: 0;
+}
+.api-sidebar {
+  background: var(--term-bg);
+  border-right: 2px solid var(--brand);
+  padding: 16px 14px;
+  overflow-y: auto;
+}
+.api-sidebar-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--brand);
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  padding-bottom: 8px;
+}
+.api-sidebar [data-sub] {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+.api-sidebar [data-sub].active {
+  background: var(--brand);
+  border-color: color-mix(in srgb,var(--brand) 65%,#000 35%);
+  color: #fff;
+}
+.api-sidebar hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,.08);
+  margin: 12px 0;
+}
+.api-sidebar #openApiStudio {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 8px;
+}
+.api-content {
+  overflow: hidden;
+  position: relative;
+  min-width: 0;
+}
+.api-subpanel {
+  height: 100%;
+}
+.api-subpanel-scroll {
+  display: none;
+  padding: 16px 18px 20px;
+  overflow-y: auto;
+  height: 100%;
+}
+@media (max-width: 1200px) {
+  .api-shell { grid-template-columns: 210px minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .api-shell { grid-template-columns: 1fr; }
+  .api-sidebar { border-right: none; border-bottom: 2px solid var(--brand); }
+}
+
+/* Replay — settings header row */
+#t-replay .settings-strip {
+  display: grid; grid-template-columns: repeat(6,1fr); gap: 8px;
+  padding: 10px; background: var(--bg2); border: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+@media (max-width:900px) { #t-replay .settings-strip { grid-template-columns: 1fr 1fr; } }
+
+/* Launch — 3-column control grid */
+#t-launch .launch-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+@media (max-width:900px) { #t-launch .launch-grid { grid-template-columns: 1fr; } }
+
+</style>
+</head>
+<body data-proto="opcua">
+
+<!-- ═══════════════ HEADER ════════════════════════════════ -->
+<header class="hdr">
+  <div class="hdr-brand">
+    <span class="eyebrow">OPC UA · MQTT · REST · Industrial Protocol Simulator</span>
+    <h1>IPS <span>DEV BENCH</span></h1>
+  </div>
+
+  <div class="hdr-status" id="hdrStatus">
+    <div class="stat-cell" id="sc-backend"><span class="lbl">Backend</span><span class="val">?</span></div>
+    <div class="stat-cell" id="sc-state"><span class="lbl">State</span><span class="val">idle</span></div>
+    <div class="stat-cell" id="sc-opcua"><span class="lbl">OPC UA</span><span class="val">?</span></div>
+    <div class="stat-cell" id="sc-mqtt"><span class="lbl">MQTT</span><span class="val">?</span></div>
+    <div class="stat-cell" id="sc-hz"><span class="lbl">Hz</span><span class="val">-</span></div>
+    <div class="stat-cell" id="sc-cursor"><span class="lbl">Cursor</span><span class="val">0/0</span></div>
+    <div class="stat-cell" id="sc-tags"><span class="lbl">Tags</span><span class="val">0</span></div>
+    <div class="stat-cell" id="sc-endpoint" style="min-width:130px"><span class="lbl">Endpoint</span><span class="val" style="font-size:9px">-</span></div>
+  </div>
+
+  <div class="hdr-right">
+    <button class="btn btn-hdr" id="btnRefresh">⟳ Refresh</button>
+    <button class="btn btn-hdr btn-ok" id="btnStart" style="color:#fff">▶ Start</button>
+    <button class="btn btn-hdr btn-bad" id="btnStop">■ Stop</button>
+    <button class="btn btn-hdr" id="btnTheme">◐ Dark</button>
+  </div>
+</header>
+
+<!-- ═══════════════ TAB RAIL ═════════════════════════════ -->
+<nav class="tab-rail">
+  <button class="tab-btn active" data-tab="generate"><span class="tab-num">01</span>Generate</button>
+  <button class="tab-btn" data-tab="files"><span class="tab-num">02</span>Files</button>
+  <button class="tab-btn" data-tab="replay"><span class="tab-num">03</span>Replay</button>
+  <button class="tab-btn" data-tab="api"><span class="tab-num">04</span>API Studio</button>
+  <button class="tab-btn" data-tab="launch"><span class="tab-num">05</span>Control</button>
+</nav>
+
+<!-- ═══════════════ MAIN ══════════════════════════════════ -->
+<main class="main">
+
+  <!-- ── 01 GENERATE ──────────────────────────────────── -->
+  <section class="panel active" id="t-generate">
+    <div class="panel-scroll">
+      <div class="gen-layout">
+
+        <!-- Left rail -->
+        <div>
+          <div class="card">
+            <div class="card-title">Domain &amp; Scenario</div>
+            <div class="fg-item"><span class="lbl">Domain</span><select id="domainSelect"></select></div>
+            <div class="fg-item" style="margin-top:8px"><span class="lbl">Scenario</span><select id="scenarioSelect"></select></div>
+            <div class="fg-item" style="margin-top:8px"><span class="lbl">Output Filename</span><input id="outputFilename" type="text" placeholder="output.csv"/></div>
+            <div id="genDescription" class="hint" style="margin-top:6px"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Actions</div>
+            <div class="col">
+              <button class="btn btn-brand" id="generateBtn">▶ Generate CSV</button>
+              <button class="btn" id="generateLoadBtn">▶ Generate &amp; Load into Replay</button>
+              <button class="btn btn-sm" id="resetParamsBtn">↺ Reset Parameters</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: params + result -->
+        <div>
+          <div class="card">
+            <div class="card-title">Parameters</div>
+            <div id="parameterForm" class="fg fg-2"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Generation Result</div>
+            <div id="genSummary" class="hint">No file generated yet.</div>
+            <div id="genPreview" class="tbl-wrap" style="max-height:260px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 02 FILES ─────────────────────────────────────── -->
+  <section class="panel" id="t-files">
+    <div class="panel-scroll">
+
+      <div class="g2" style="margin-bottom:10px">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Upload</div>
+          <div class="row">
+            <input id="uploadInput" type="file" accept=".csv,.xlsx" multiple style="flex:1"/>
+            <button class="btn btn-brand" id="uploadBtn">↑ Upload</button>
+            <button class="btn" id="refreshFilesBtn">⟳ Refresh</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-title">Protocol Assignment Summary</div>
+          <div class="kv">
+            <div class="kv-cell"><div class="k">Shared / Both</div><div class="v" id="kvShared">—</div></div>
+            <div class="kv-cell"><div class="k">OPC UA Plan</div><div class="v" id="kvOpcua">—</div></div>
+            <div class="kv-cell"><div class="k">MQTT Plan</div><div class="v" id="kvMqtt">—</div></div>
+            <div class="kv-cell"><div class="k">Total Files</div><div class="v" id="kvTotal">0</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Available Files
+          <div class="ct-right"><span class="hint">Check to assign to protocol plans</span></div>
+        </div>
+        <div id="filesTable" class="tbl-wrap" style="max-height:320px"></div>
+      </div>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">File Preview</div>
+          <div id="filePreviewMeta" class="hint">No file selected.</div>
+          <div id="filePreview" class="tbl-wrap" style="max-height:240px"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">File Metadata</div>
+          <div id="fileMetaKv" class="kv"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── 03 REPLAY ────────────────────────────────────── -->
+  <section class="panel" id="t-replay">
+    <div class="panel-scroll">
+
+      <!-- Settings strip — always visible -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">Replay Settings
+          <div class="ct-right">
+            <button class="btn btn-ok btn-sm" id="startReplayBtn">▶ Start</button>
+            <button class="btn btn-bad btn-sm" id="stopReplayBtn">■ Stop</button>
+            <button class="btn btn-sm" id="restartReplayBtn">↺ Restart</button>
+            <button class="btn btn-sm" id="resetCursorBtn">⤴ Reset Cursor</button>
+          </div>
+        </div>
+        <div class="fg fg-4">
+          <div class="fg-item">
+            <span class="lbl">Protocol Mode</span>
+            <select id="protocolMode">
+              <option value="opcua">OPC UA only</option>
+              <option value="mqtt">MQTT only</option>
+              <option value="both">OPC UA + MQTT</option>
+            </select>
+          </div>
+          <div class="fg-item"><span class="lbl">Frequency Hz</span><input id="frequencyHz" type="number" value="1" min="0.1" step="0.1"/></div>
+          <div class="fg-item">
+            <span class="lbl">Loop Mode</span>
+            <select id="loopMode"><option>loop_forever</option><option>once</option><option>hold_last</option><option>ping_pong</option></select>
+          </div>
+          <div class="fg-item">
+            <span class="lbl">Timestamp Mode</span>
+            <select id="timestampMode"><option>wall_clock</option><option>csv_timestamp_ignore_rate</option><option>relative_from_csv</option></select>
+          </div>
+          <div class="fg-item"><span class="lbl">Start Row</span><input id="startRow" type="number" value="0" min="0"/></div>
+          <div class="fg-item"><span class="lbl">Max Rows</span><input id="maxRows" type="number" placeholder="optional" min="1"/></div>
+          <div class="fg-item"></div><!-- spacer -->
+          <div class="fg-item"></div>
+        </div>
+      </div>
+
+      <div class="g2">
+        <!-- OPC UA settings -->
+        <div class="card proto-opc" id="opcCard">
+          <div class="card-title">OPC UA Settings</div>
+          <div class="fg fg-2">
+            <div class="fg-item"><span class="lbl">Namespace URI</span><input id="namespaceUri" value="http://local/industrial-tag-simulator"/></div>
+            <div class="fg-item"><span class="lbl">Root Folder</span><input id="rootFolder" value="TagSimulator"/></div>
+            <div class="fg-item"><span class="lbl">Node ID Prefix</span><input id="nodePrefix" value="TagSimulator"/></div>
+            <div class="fg-item"><span class="lbl">Endpoint</span><input id="opcuaEndpoint" value="opc.tcp://localhost:4840/simulator" readonly/></div>
+          </div>
+        </div>
+
+        <!-- MQTT settings -->
+        <div class="card proto-mqtt" id="mqttCard">
+          <div class="card-title">MQTT Settings</div>
+          <div class="fg fg-2">
+            <div class="fg-item"><span class="lbl">Host</span><input id="mqttHost" value="localhost"/></div>
+            <div class="fg-item"><span class="lbl">Port</span><input id="mqttPort" type="number" value="1883"/></div>
+            <div class="fg-item"><span class="lbl">Topic Prefix</span><input id="mqttTopicPrefix" value="industrial-tag-simulator"/></div>
+            <div class="fg-item"><span class="lbl">Device ID</span><input id="mqttDeviceId" value="FlowMeter01"/></div>
+            <div class="fg-item"><span class="lbl">Client ID</span><input id="mqttClientId" value="industrial-tag-simulator"/></div>
+            <div class="fg-item"><span class="lbl">Username</span><input id="mqttUsername" placeholder="optional"/></div>
+            <div class="fg-item"><span class="lbl">Password</span><input id="mqttPassword" type="password" placeholder="optional"/></div>
+            <div class="fg-item">
+              <span class="lbl">QoS</span>
+              <select id="mqttQos"><option>0</option><option>1</option><option>2</option></select>
+            </div>
+            <div class="fg-item"><div class="ck-row" style="margin-top:20px"><input id="mqttRetain" type="checkbox"/><span class="lbl">Retain</span></div></div>
+            <div class="fg-item"><div class="ck-row" style="margin-top:20px"><input id="pubIndividual" type="checkbox" checked/><span class="lbl">Individual topics</span></div></div>
+            <div class="fg-item"><div class="ck-row" style="margin-top:20px"><input id="pubAggregate" type="checkbox" checked/><span class="lbl">Aggregate /all</span></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Protocol plan / tag preview -->
+      <div class="card">
+        <div class="card-title">Protocol Plan — Tag Preview
+          <div class="ct-right">
+            <button class="btn btn-sm" id="previewTagPlanBtn">⟳ Build Preview</button>
+            <button class="btn btn-brand btn-sm" id="applyMultiBtn">✓ Apply Plans</button>
+          </div>
+        </div>
+        <div class="hint" style="margin-bottom:8px">Assign files in the Files tab, build the preview, check/uncheck tags, then Apply Plans before Start.</div>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn btn-sm" id="selAllOpc">✓ All OPC UA</button>
+          <button class="btn btn-sm" id="clrOpc">✗ Clear OPC UA</button>
+          <button class="btn btn-sm" id="selAllMqtt">✓ All MQTT</button>
+          <button class="btn btn-sm" id="clrMqtt">✗ Clear MQTT</button>
+        </div>
+        <div id="tagPlanSummary" class="hint">No tag preview built yet.</div>
+        <div id="tagPlanBody"></div>
+      </div>
+
+      <!-- Manual single-file -->
+      <div class="card">
+        <div class="card-title">Manual Single-File Replay
+          <div class="ct-right">
+            <button class="btn btn-sm" id="autoMapBtn">⟳ Auto-map</button>
+            <button class="btn btn-sm" id="disableLabelsBtn">Disable Labels</button>
+            <button class="btn btn-sm btn-ok" id="enableAllBtn">All On</button>
+            <button class="btn btn-sm btn-bad" id="disableAllBtn">All Off</button>
+            <button class="btn btn-brand btn-sm" id="applyManualBtn">✓ Apply Manual Config</button>
+          </div>
+        </div>
+        <div class="g2" style="margin-bottom:8px">
+          <div class="kv">
+            <div class="kv-cell"><div class="k">File</div><div class="v" id="replayFile">—</div></div>
+            <div class="kv-cell"><div class="k">Source</div><div class="v" id="replaySource">—</div></div>
+            <div class="kv-cell"><div class="k">Rows</div><div class="v" id="replayRows">0</div></div>
+            <div class="kv-cell"><div class="k">Columns</div><div class="v" id="replayCols">0</div></div>
+          </div>
+          <div class="hint">Use <strong>Load Manual</strong> in the Files tab to load a single file here. Manual mapping overrides the protocol plan for that run.</div>
+        </div>
+        <div id="mappingTable" class="tbl-wrap" style="max-height:300px"></div>
+      </div>
+
+      <!-- Current values -->
+      <div class="card">
+        <div class="card-title">Live Current Values</div>
+        <div id="currentValues" class="tbl-wrap" style="max-height:240px"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── 04 API STUDIO ─────────────────────────────────── -->
+  <section class="panel" id="t-api">
+    <div class="api-shell">
+
+      <!-- sidebar -->
+      <div class="api-sidebar">
+        <div class="api-sidebar-title">API Studio</div>
+        <button class="btn btn-hdr" style="display:block;width:100%;margin-bottom:3px;text-align:left" data-sub="studio">⊞ Builder</button>
+        <button class="btn btn-hdr" style="display:block;width:100%;margin-bottom:3px;text-align:left" data-sub="quick">⚡ Test Console</button>
+        <button class="btn btn-hdr" style="display:block;width:100%;margin-bottom:3px;text-align:left" data-sub="conn">⛁ DB Connection</button>
+        <button class="btn btn-hdr" style="display:block;width:100%;margin-bottom:3px;text-align:left" data-sub="mapping">⇄ Source Mapping</button>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,.08);margin:8px 0"/>
+        <a id="openApiStudio" class="btn btn-brand" style="display:block;text-align:center" href="http://127.0.0.1:5050" target="_blank">↗ Full Studio</a>
+      </div>
+
+      <!-- sub-panels -->
+      <div class="api-content">
+
+        <div class="sub-panel active api-subpanel" id="sub-studio" style="height:100%">
+          <iframe id="apiFrame" src="http://127.0.0.1:5050"
+            style="width:100%;height:100%;border:0;background:var(--term-bg)"></iframe>
+        </div>
+
+        <div class="sub-panel api-subpanel-scroll" id="sub-quick" style="display:none;padding:12px;overflow-y:auto;height:100%">
+          <div class="card">
+            <div class="card-title">Quick Test</div>
+            <div class="row" style="margin-bottom:8px">
+              <button class="btn btn-sm" onclick="quickGet('/api/v1/assets')">GET Assets</button>
+              <button class="btn btn-sm" onclick="quickGet('/api/v1/sap/pm/notifications')">GET SAP PM</button>
+              <button class="btn btn-sm" onclick="quickGet('/api/v1/stream/tags')">Tag Stream</button>
+            </div>
+            <div class="fg-item"><span class="lbl">POST Health Snapshot JSON</span><textarea id="healthJson">{"assetCode":"EAF_01","healthScore":48,"condition":"CRITICAL"}</textarea></div>
+            <div class="row" style="margin-top:6px">
+              <button class="btn btn-brand btn-sm" onclick="quickPost('/api/v1/asset-health/snapshots',document.getElementById('healthJson').value)">POST Snapshot</button>
+            </div>
+            <div class="term" id="apiResult" style="margin-top:10px;max-height:280px">No API test yet.</div>
+          </div>
+        </div>
+
+        <div class="sub-panel api-subpanel-scroll" id="sub-conn" style="display:none;padding:12px;overflow-y:auto;height:100%">
+          <div class="g2">
+            <div class="card">
+              <div class="card-title">Connection</div>
+              <div class="fg fg-2">
+                <div class="fg-item"><span class="lbl">Source Type</span><select id="sourceType"><option value="mssql">MSSQL</option><option value="excel">Excel/CSV</option><option value="sqlite">SQLite</option></select></div>
+                <div class="fg-item"><span class="lbl">Server</span><input id="dbServer" value="localhost"/></div>
+                <div class="fg-item"><span class="lbl">Port</span><input id="dbPort" value="1433"/></div>
+                <div class="fg-item"><span class="lbl">Auth</span><select id="dbAuth"><option value="sql">SQL Login</option><option value="windows">Windows Auth</option></select></div>
+                <div class="fg-item"><span class="lbl">Username</span><input id="dbUser" value="sa"/></div>
+                <div class="fg-item"><span class="lbl">Password</span><input id="dbPass" type="password"/></div>
+                <div class="fg-item"><span class="lbl">Database</span><select id="dbDatabase"><option>master</option></select></div>
+                <div class="fg-item"><span class="lbl">Table</span><select id="dbTable"><option>dbo.tag_snapshots</option></select></div>
+              </div>
+              <div class="row" style="margin-top:8px">
+                <button class="btn btn-sm" id="loadDbsBtn">Load DBs</button>
+                <button class="btn btn-sm" id="loadTablesBtn">Load Tables</button>
+                <button class="btn btn-brand btn-sm" id="testDbBtn">Test Connection</button>
+                <button class="btn btn-ok btn-sm" id="writeCurrentBtn">Write Current Values</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Connection Result</div>
+              <div class="term" id="connResult" style="max-height:300px">No action yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-panel api-subpanel-scroll" id="sub-mapping" style="display:none;padding:12px;overflow-y:auto;height:100%">
+          <div class="g2">
+            <div class="card">
+              <div class="card-title">Map API → Source</div>
+              <div class="fg-item"><span class="lbl">API Endpoint</span><select id="apiEndpoint"></select></div>
+              <div class="fg-item" style="margin-top:6px"><span class="lbl">Data Source</span><select id="apiSource"><option value="mssql">MSSQL Table</option><option value="excel">Excel/CSV</option><option value="sqlite">API Studio Internal</option></select></div>
+              <div class="fg-item" style="margin-top:6px"><span class="lbl">Database</span><select id="mapDatabase"></select></div>
+              <div class="fg-item" style="margin-top:6px"><span class="lbl">Table</span><select id="mapTable"></select></div>
+              <div class="fg-item" style="margin-top:6px"><span class="lbl">Excel/CSV File</span><select id="mapExcel"></select></div>
+              <div class="fg-item" style="margin-top:6px"><span class="lbl">Sheet</span><input id="mapSheet" value="active"/></div>
+              <button class="btn btn-brand" style="margin-top:10px" id="saveMappingBtn">Save Mapping</button>
+            </div>
+            <div class="card">
+              <div class="card-title">Saved Mappings</div>
+              <div id="mappingsTable" class="tbl-wrap" style="max-height:360px"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 05 CONTROL / LAUNCH ───────────────────────────── -->
+  <section class="panel" id="t-launch">
+    <div class="panel-scroll">
+
+      <div class="launch-grid">
+
+        <!-- Port Selection -->
+        <div class="card">
+          <div class="card-title">Port Configuration</div>
+          <div class="fg fg-2">
+            <div class="fg-item"><span class="lbl">Industrial UI</span><input id="lpIndustrial" value="8000"/></div>
+            <div class="fg-item"><span class="lbl">API Studio</span><input id="lpApi" value="5050"/></div>
+            <div class="fg-item"><span class="lbl">Portal</span><input id="lpPortal" value="8001"/></div>
+            <div class="fg-item"><span class="lbl">OPC UA Server</span><input id="lpOpcua" value="4840"/></div>
+            <div class="fg-item"><span class="lbl">MQTT Broker</span><input id="lpMqtt" value="1883"/></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn btn-brand btn-sm" id="savePorts">Save Ports</button>
+            <button class="btn btn-sm" id="refreshLaunch">⟳ Refresh Status</button>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="card">
+          <div class="card-title">Service Control</div>
+          <div class="col">
+            <button class="btn btn-ok" id="launchStart">▶ Start Services (Hidden)</button>
+            <button class="btn btn-bad" id="launchStop">■ Stop All Services</button>
+            <button class="btn btn-blue" id="launchOpenApp">⊞ Open App Window</button>
+          </div>
+          <hr class="sep"/>
+          <div class="row">
+            <a class="btn" id="openPortal" href="#" target="_blank">↗ Portal</a>
+            <a class="btn" id="openApi" href="#" target="_blank">↗ API Studio</a>
+          </div>
+          <div class="hint" style="margin-top:8px">Services run hidden. Required packages install automatically from bundled wheels when missing.</div>
+        </div>
+
+        <!-- Status -->
+        <div class="card">
+          <div class="card-title">Service Status</div>
+          <div id="launchStatusKv" class="kv" style="margin-bottom:8px"></div>
+          <div class="card-title" style="margin-top:8px">URLs</div>
+          <div class="term" id="launchUrls" style="max-height:100px">Loading...</div>
+        </div>
+
+      </div>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Saved Configs</div>
+          <div class="row" style="margin-bottom:8px">
+            <div class="fg-item" style="flex:1"><span class="lbl">Name</span><input id="configName" placeholder="my-demo-config"/></div>
+            <div class="fg-item" style="flex:2"><span class="lbl">Description</span><input id="configDesc" placeholder="optional description"/></div>
+          </div>
+          <div class="row" style="margin-bottom:10px">
+            <button class="btn btn-brand btn-sm" id="saveConfigBtn">Save Config</button>
+            <button class="btn btn-sm" id="exportConfigBtn">↓ Export JSON</button>
+            <button class="btn btn-sm" id="importConfigBtn">↑ Import JSON</button>
+            <input id="importConfigInput" type="file" accept=".json" style="display:none"/>
+          </div>
+          <div id="configsTable" class="tbl-wrap" style="max-height:200px"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Runtime Status (Raw)</div>
+          <div class="term" id="rawStatus" style="max-height:300px">{}</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══════════════ MESSAGE BAR ══════════════════════════ -->
+<div class="msgbar" id="msgbar"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   IPS DEV BENCH — application JS
+   All API calls target the Industrial simulator backend
+   (configurable via LAUNCHER_CONFIG port)
+════════════════════════════════════════════════════════════ */
+
+// ── Config ───────────────────────────────────────────────
+const CFG = window.SIMULATOR_LAUNCHER_CONFIG || {};
+const BASE = `http://127.0.0.1:${CFG.industrial_web_port || 8000}`;
+const API_BASE = `http://127.0.0.1:${CFG.api_studio_port || 5050}`;
+
+// ── State ────────────────────────────────────────────────
+const S = {
+  generators: [], genSpec: null, genDomainId: null,
+  files: [], lastGenReq: null,
+  selectedShared: new Set(), selectedOpcua: new Set(), selectedMqtt: new Set(),
+  selectedCsvFile: null, selectedCsvMeta: null,
+  replayConfig: null, replayMode: null,
+  tagPlan: {opcua: [], mqtt: []}, tagPlanBuilt: false, tagPlanDirty: true,
+  currentValues: [], mappings: [], endpoints: []
+};
+
+// ── Utilities ────────────────────────────────────────────
+const esc = v => String(v ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+const $  = id => document.getElementById(id);
+const fk = f  => `${f.source}:${f.filename}`;
+const fromSet = set => [...set].map(k => { const [src,...rest]=k.split(':'); return {source:src,filename:rest.join(':')}; });
+const setNames = set => [...set].map(k=>k.split(':').slice(1).join(':')).join(', ') || '—';
+
+let _msgTimer = null;
+function msg(text, kind='info') {
+  const el = $('msgbar');
+  el.textContent = text; el.className = `msgbar show ${kind}`;
+  clearTimeout(_msgTimer);
+  _msgTimer = setTimeout(() => el.classList.remove('show'), 7000);
+}
+
+async function api(path, opts={}) {
+  const url = path.startsWith('http') ? path : BASE + path;
+  const r = await fetch(url, opts);
+  let d = {}; try { d = await r.json(); } catch(_) {}
+  if (!r.ok) throw new Error(d.detail?.error || d.error || r.statusText || String(r.status));
+  return d;
+}
+
+function mkTable(rows, cols, actionsFn) {
+  if (!rows?.length) return '<div class="hint" style="padding:8px">No data.</div>';
+  const c = cols || Object.keys(rows[0]);
+  const head = c.map(col=>`<th>${esc(col)}</th>`).join('') + (actionsFn ? '<th>Actions</th>' : '');
+  const body = rows.map((r,i) =>
+    `<tr>${c.map(col=>`<td>${esc(r[col]??'')}</td>`).join('')}${actionsFn?`<td>${actionsFn(r,i)}</td>`:''}</tr>`
+  ).join('');
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// ── Theme toggle ─────────────────────────────────────────
+(function(){
+  const root = document.documentElement;
+  const btn  = $('btnTheme');
+  const KEY  = 'ips_theme';
+  function apply(t) {
+    root.setAttribute('data-theme', t);
+    btn.textContent = t === 'dark' ? '☀ Light' : '◐ Dark';
+  }
+  apply(localStorage.getItem(KEY) || 'light');
+  btn.addEventListener('click', () => {
+    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(KEY, next); apply(next);
+  });
+})();
+
+// ── Tab switching ─────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+  const tab = btn.dataset.tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const el = document.getElementById(`t-${tab}`); if (el) el.classList.add('active');
+  history.replaceState(null,'',`#${tab}`);
+}));
+// API sub-panels
+document.querySelectorAll('[data-sub]').forEach(btn => btn.addEventListener('click', () => {
+  const id = btn.dataset.sub;
+  document.querySelectorAll('[data-sub]').forEach(b => b.classList.toggle('active', b === btn));
+  document.querySelectorAll('.sub-panel').forEach(p => { p.style.display = p.id === `sub-${id}` ? '' : 'none'; });
+}));
+const __defaultApiSub = document.querySelector('[data-sub="studio"]');
+if (__defaultApiSub) __defaultApiSub.classList.add('active');
+// restore hash on load
+(function(){ const h = (location.hash||'#generate').slice(1);
+  const btn = document.querySelector(`.tab-btn[data-tab="${h}"]`); if (btn) btn.click(); })();
+
+// ── Protocol mode → show/hide settings cards + body attr ─
+$('protocolMode').addEventListener('change', () => {
+  document.body.setAttribute('data-proto', $('protocolMode').value);
+  markDirty();
+});
+document.body.setAttribute('data-proto', $('protocolMode').value);
+
+// ── Status ────────────────────────────────────────────────
+function sc(id, val, cls) {
+  const cell = $(id); if (!cell) return;
+  cell.querySelector('.val').textContent = val;
+  cell.className = 'stat-cell' + (cls ? ' '+cls : '');
+}
+async function refreshStatus() {
+  try {
+    const d = await api('/api/status');
+    const proto = d.protocol || {};
+    const opc  = proto.opcua || {};
+    const mqtt = proto.mqtt  || {};
+    const sim  = d.simulator || {};
+    sc('sc-backend', d.backend || 'ok', 'ok');
+    sc('sc-state',   sim.state || 'idle', sim.state === 'running' ? 'ok' : '');
+    sc('sc-opcua',   opc.running ? 'running' : 'stopped', opc.running ? 'ok' : 'bad');
+    sc('sc-mqtt',    mqtt.running ? 'running' : 'stopped', mqtt.running ? 'ok' : 'bad');
+    sc('sc-hz',      sim.frequency_hz || '-');
+    sc('sc-cursor',  `${sim.cursor??0}/${sim.row_count??0}`);
+    sc('sc-tags',    sim.tag_count || 0, sim.tag_count > 0 ? 'ok' : '');
+    const ep = $('sc-endpoint'); if(ep) ep.querySelector('.val').textContent = proto.endpoint || '-';
+    $('rawStatus').textContent = JSON.stringify(d, null, 2);
+  } catch(e) { sc('sc-backend','error','bad'); }
+}
+
+// ── Generators ───────────────────────────────────────────
+async function loadGenerators() {
+  const d = await api('/api/generators');
+  S.generators = d.generators;
+  $('domainSelect').innerHTML = d.generators.map(g=>`<option value="${g.domain_id}">${esc(g.display_name)}</option>`).join('');
+  if (d.generators.length) await loadGenSpec(d.generators[0].domain_id);
+}
+async function loadGenSpec(id) {
+  const spec = await api(`/api/generators/${id}/spec`);
+  S.genSpec = spec; S.genDomainId = id;
+  $('genDescription').textContent = spec.description || '';
+  $('outputFilename').value = spec.default_output_filename || '';
+  $('scenarioSelect').innerHTML = spec.scenarios.map(s=>`<option value="${s.id}">${esc(s.label)}</option>`).join('');
+  renderParamForm();
+}
+function renderParamForm() {
+  const spec = S.genSpec; if (!spec) { $('parameterForm').innerHTML=''; return; }
+  $('parameterForm').innerHTML = spec.parameters.map(p => {
+    const unit = p.unit ? ` (${p.unit})` : '';
+    let ctrl;
+    if (p.type === 'select') {
+      ctrl = `<select data-param="${p.name}">${(p.options||[]).map(o=>`<option value="${o}"${o==p.default?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
+    } else {
+      ctrl = `<input data-param="${p.name}" type="${p.type==='number'?'number':'text'}" value="${esc(p.default??'')}"${p.min!=null?` min="${p.min}"`:''}${p.max!=null?` max="${p.max}"`:''}${p.step!=null?` step="${p.step}"`:''}/>`;
+    }
+    return `<div class="fg-item"><span class="lbl">${esc(p.label+unit)}</span>${ctrl}</div>`;
+  }).join('');
+}
+function collectParams() {
+  const params = {};
+  document.querySelectorAll('[data-param]').forEach(el => {
+    const p = S.genSpec?.parameters.find(x=>x.name===el.dataset.param);
+    params[el.dataset.param] = p?.type === 'number' ? Number(el.value) : el.value;
+  });
+  return params;
+}
+async function generate(load=false) {
+  const body = {scenario: $('scenarioSelect').value, output_filename: $('outputFilename').value, parameters: collectParams(), load_into_replay: load};
+  S.lastGenReq = {domain_id: S.genDomainId, ...body};
+  const d = await api(`/api/generators/${S.genDomainId}/generate`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  $('genSummary').textContent = `${d.filename} — ${d.row_count} rows × ${d.column_count} cols`;
+  $('genPreview').innerHTML = mkTable(d.preview);
+  msg(`Generated ${d.filename}`, 'ok');
+  await refreshFiles();
+  if (load) await loadFileIntoReplay(d.filename, 'generated');
+}
+$('domainSelect').addEventListener('change', e => loadGenSpec(e.target.value).catch(e=>msg(e.message,'error')));
+$('generateBtn').addEventListener('click', () => generate(false).catch(e=>msg(e.message,'error')));
+$('generateLoadBtn').addEventListener('click', () => generate(true).catch(e=>msg(e.message,'error')));
+$('resetParamsBtn').addEventListener('click', renderParamForm);
+
+// ── Files ─────────────────────────────────────────────────
+async function refreshFiles() {
+  const d = await api('/api/csv/files');
+  S.files = d.files || [];
+  $('kvTotal').textContent = S.files.length;
+  $('filesTable').innerHTML = mkTable(S.files,
+    ['filename','source','row_count','column_count','modified_at'],
+    r => {
+      const k = esc(fk(r));
+      const fn = encodeURIComponent(r.filename), src = r.source;
+      return `<div class="file-actions">
+        <label class="ck-row"><input type="checkbox" data-shared="${k}" ${S.selectedShared.has(fk(r))?'checked':''}/><span class="lbl" style="margin:0">Shared</span></label>
+        <label class="ck-row"><input type="checkbox" data-opcua="${k}" ${S.selectedOpcua.has(fk(r))?'checked':''}/><span class="lbl" style="margin:0">OPC UA</span></label>
+        <label class="ck-row"><input type="checkbox" data-mqtt="${k}" ${S.selectedMqtt.has(fk(r))?'checked':''}/><span class="lbl" style="margin:0">MQTT</span></label>
+        <button class="btn btn-sm" onclick="previewFile('${fn}','${src}')">Preview</button>
+        <button class="btn btn-sm btn-blue" onclick="loadFileIntoReplay('${fn}','${src}')">Load Manual</button>
+        <button class="btn btn-sm btn-bad" onclick="deleteFile('${fn}','${src}')">Delete</button>
+      </div>`;
+    }
+  );
+  // re-attach checkbox listeners
+  document.querySelectorAll('[data-shared]').forEach(cb => cb.addEventListener('change', e => {
+    e.target.checked ? S.selectedShared.add(e.target.dataset.shared) : S.selectedShared.delete(e.target.dataset.shared);
+    updateAssignKv(); markDirty();
+  }));
+  document.querySelectorAll('[data-opcua]').forEach(cb => cb.addEventListener('change', e => {
+    e.target.checked ? S.selectedOpcua.add(e.target.dataset.opcua) : S.selectedOpcua.delete(e.target.dataset.opcua);
+    updateAssignKv(); markDirty();
+  }));
+  document.querySelectorAll('[data-mqtt]').forEach(cb => cb.addEventListener('change', e => {
+    e.target.checked ? S.selectedMqtt.add(e.target.dataset.mqtt) : S.selectedMqtt.delete(e.target.dataset.mqtt);
+    updateAssignKv(); markDirty();
+  }));
+  updateAssignKv();
+}
+function updateAssignKv() {
+  $('kvShared').textContent = setNames(S.selectedShared);
+  $('kvOpcua').textContent  = setNames(S.selectedOpcua);
+  $('kvMqtt').textContent   = setNames(S.selectedMqtt);
+}
+window.previewFile = async function(fnEnc, src) {
+  const fn = decodeURIComponent(fnEnc);
+  const d = await api(`/api/csv/files/${encodeURIComponent(fn)}/metadata?source=${src}`);
+  $('filePreviewMeta').textContent = `${fn} | ${src} | ${d.row_count} rows | ${d.column_count} cols`;
+  $('filePreview').innerHTML = mkTable(d.preview);
+  $('fileMetaKv').innerHTML = `
+    <div class="kv-cell"><div class="k">Filename</div><div class="v">${esc(fn)}</div></div>
+    <div class="kv-cell"><div class="k">Source</div><div class="v">${esc(src)}</div></div>
+    <div class="kv-cell"><div class="k">Rows</div><div class="v">${d.row_count}</div></div>
+    <div class="kv-cell"><div class="k">Columns</div><div class="v">${d.column_count}</div></div>
+  `;
+};
+window.loadFileIntoReplay = async function(fnEnc, src) {
+  const fn = decodeURIComponent(fnEnc);
+  const d = await api(`/api/csv/files/${encodeURIComponent(fn)}/load?source=${src}`, {method:'POST'});
+  S.selectedCsvFile = {filename:fn, source:src}; S.selectedCsvMeta = d;
+  $('replayFile').textContent   = fn;
+  $('replaySource').textContent = src;
+  $('replayRows').textContent   = d.row_count;
+  $('replayCols').textContent   = d.column_count;
+  renderMappingTable(d.default_tag_mappings);
+  document.querySelector('.tab-btn[data-tab="replay"]').click();
+  msg(`Loaded ${fn} into manual replay.`, 'ok');
+};
+window.deleteFile = async function(fnEnc, src) {
+  const fn = decodeURIComponent(fnEnc);
+  if (src === 'sample') return msg('Sample files cannot be deleted.', 'error');
+  await api(`/api/csv/files/${encodeURIComponent(fn)}?source=${src}`, {method:'DELETE'});
+  msg(`Deleted ${fn}`, 'ok'); await refreshFiles();
+};
+async function uploadFiles() {
+  const inp = $('uploadInput');
+  if (!inp.files.length) throw new Error('Select one or more CSV/XLSX files first.');
+  for (const f of inp.files) { const fd = new FormData(); fd.append('file',f); await api('/api/csv/upload',{method:'POST',body:fd}); }
+  msg(`Uploaded ${inp.files.length} file(s).`, 'ok'); inp.value=''; await refreshFiles();
+}
+$('uploadBtn').addEventListener('click', () => uploadFiles().catch(e=>msg(e.message,'error')));
+$('refreshFilesBtn').addEventListener('click', () => refreshFiles().catch(e=>msg(e.message,'error')));
+
+// ── Mapping table ──────────────────────────────────────────
+function renderMappingTable(mappings) {
+  const rows = mappings || [];
+  if (!rows.length) { $('mappingTable').innerHTML='<div class="hint" style="padding:8px">No file loaded. Use Load Manual in Files tab.</div>'; return; }
+  const types = ['Double','Int64','Boolean','String'];
+  const body = rows.map((m,i)=>`<tr data-map="${i}">
+    <td><input type="checkbox" data-f="enabled" ${m.enabled?'checked':''}></td>
+    <td class="mono">${esc(m.csv_column)}</td>
+    <td><input data-f="tag_name" value="${esc(m.tag_name)}"/></td>
+    <td><input data-f="node_id" value="${esc(m.node_id)}"/></td>
+    <td><select data-f="data_type">${types.map(t=>`<option${m.data_type===t?' selected':''}>${t}</option>`).join('')}</select></td>
+    <td><input data-f="initial_value" value="${esc(m.initial_value??'')}"/></td>
+    <td><input type="checkbox" data-f="writable" ${m.writable?'checked':''}></td>
+  </tr>`).join('');
+  $('mappingTable').innerHTML = `<table><thead><tr><th>On</th><th>Column</th><th>Tag Name</th><th>Node ID / Topic</th><th>Type</th><th>Initial</th><th>Writable</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function collectMappings() {
+  const defs = S.selectedCsvMeta?.default_tag_mappings || [];
+  return [...document.querySelectorAll('[data-map]')].map(row => {
+    const i = Number(row.dataset.map); const g = f => row.querySelector(`[data-f="${f}"]`);
+    return {enabled:g('enabled').checked, csv_column:defs[i].csv_column, tag_name:g('tag_name').value, node_id:g('node_id').value, data_type:g('data_type').value, initial_value:g('initial_value').value||null, writable:g('writable').checked};
+  });
+}
+function setAllMappings(en) { document.querySelectorAll('[data-f="enabled"]').forEach(c=>c.checked=en); }
+function disableLabelCols() {
+  const defs = S.selectedCsvMeta?.default_tag_mappings || [];
+  document.querySelectorAll('[data-map]').forEach(row => {
+    const name = defs[Number(row.dataset.map)]?.csv_column.toLowerCase() || '';
+    if (['timestamp','scenario','operating_state','phase','product','heat_id'].includes(name) || name.endsWith('_active') || name.endsWith('_alarm'))
+      row.querySelector('[data-f="enabled"]').checked = false;
+  });
+}
+$('autoMapBtn').addEventListener('click', () => renderMappingTable(S.selectedCsvMeta?.default_tag_mappings||[]));
+$('disableLabelsBtn').addEventListener('click', disableLabelCols);
+$('enableAllBtn').addEventListener('click', () => setAllMappings(true));
+$('disableAllBtn').addEventListener('click', () => setAllMappings(false));
+
+// ── Replay common fields ───────────────────────────────────
+function commonReplayFields() {
+  return {
+    protocol: $('protocolMode').value,
+    frequency_hz: Number($('frequencyHz').value),
+    loop_mode: $('loopMode').value,
+    timestamp_mode: $('timestampMode').value,
+    start_row: Number($('startRow').value),
+    max_rows: $('maxRows').value ? Number($('maxRows').value) : null,
+    namespace_uri: $('namespaceUri').value,
+    root_folder: $('rootFolder').value,
+    node_id_prefix: $('nodePrefix').value,
+    mqtt_host: $('mqttHost').value,
+    mqtt_port: Number($('mqttPort').value),
+    mqtt_topic_prefix: $('mqttTopicPrefix').value,
+    mqtt_device_id: $('mqttDeviceId').value || 'FlowMeter01',
+    mqtt_client_id: $('mqttClientId').value,
+    mqtt_username: $('mqttUsername').value || null,
+    mqtt_password: $('mqttPassword').value || null,
+    mqtt_qos: Number($('mqttQos').value),
+    mqtt_retain: $('mqttRetain').checked,
+    publish_individual_tags: $('pubIndividual').checked,
+    publish_aggregate: $('pubAggregate').checked
+  };
+}
+
+// ── Tag plan ───────────────────────────────────────────────
+function planKey(e) { return `${e.protocol}:${e.source}:${e.filename}:${e.csv_column}`; }
+function safePrefix(fn) { return String(fn||'file').replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9_]+/g,'_').replace(/^_+|_+$/g,'')||'file'; }
+function activeFiles() {
+  const mode = $('protocolMode').value;
+  const sh = fromSet(S.selectedShared), opc = fromSet(S.selectedOpcua), mqtt = fromSet(S.selectedMqtt);
+  const merge = (...g) => { const out=[],seen=new Set(); g.flat().forEach(i=>{const k=fk(i);if(!seen.has(k)){seen.add(k);out.push(i);}}); return out; };
+  if (mode==='both')  return {opcua: merge(sh,opc), mqtt: merge(sh,mqtt)};
+  if (mode==='opcua') return {opcua: merge(sh,opc), mqtt: []};
+  if (mode==='mqtt')  return {opcua: [], mqtt: merge(sh,mqtt)};
+  return {opcua:[],mqtt:[]};
+}
+function markDirty() {
+  S.tagPlanDirty = true; S.replayMode = null;
+  $('tagPlanSummary').textContent = 'File selection changed. Rebuild tag preview.';
+}
+async function buildTagPlan(silent=false) {
+  const files = activeFiles();
+  const prev = new Map([...S.tagPlan.opcua,...S.tagPlan.mqtt].map(e=>[planKey(e),e.enabled]));
+  const next  = {opcua:[],mqtt:[]};
+  const nodePrefix = $('nodePrefix').value || 'TagSimulator';
+  for (const proto of ['opcua','mqtt']) {
+    for (const item of files[proto]) {
+      const meta = await api(`/api/csv/files/${encodeURIComponent(item.filename)}/metadata?source=${item.source}`);
+      const pfx  = safePrefix(item.filename);
+      for (const tag of (meta.default_tag_mappings||[])) {
+        const suffix = String(tag.node_id||tag.csv_column).split('.').pop();
+        const entry  = {protocol:proto, source:item.source, filename:item.filename, csv_column:tag.csv_column,
+          tag_name:`${pfx}_${tag.tag_name}`, node_id:`${nodePrefix}.${pfx}.${suffix}`,
+          data_type:tag.data_type||'String', enabled:true};
+        const k = planKey(entry);
+        if (prev.has(k)) entry.enabled = prev.get(k);
+        next[proto].push(entry);
+      }
+    }
+  }
+  S.tagPlan = next; S.tagPlanBuilt = true; S.tagPlanDirty = false; S.replayMode = null;
+  renderTagPlan();
+  if (!silent) msg('Tag preview ready. Check/uncheck, then Apply Plans.', 'ok');
+}
+function planCounts(proto) {
+  const rows = S.tagPlan[proto]||[];
+  return {total:rows.length, sel:rows.filter(r=>r.enabled).length, unsel:rows.filter(r=>!r.enabled).length};
+}
+function renderTagPlan() {
+  const sum = $('tagPlanSummary');
+  const box = $('tagPlanBody');
+  if (!S.tagPlanBuilt) {
+    sum.textContent = 'No tag preview built yet.';
+    box.innerHTML = '<div class="hint" style="padding:8px">Select files, choose protocol mode, then click Build Preview.</div>';
+    return;
+  }
+  const oc = planCounts('opcua'), mc = planCounts('mqtt');
+  sum.textContent = `OPC UA: ${oc.sel} run / ${oc.unsel} skipped. MQTT: ${mc.sel} run / ${mc.unsel} skipped.`;
+  box.innerHTML = ['opcua','mqtt'].map(proto => {
+    const rows = S.tagPlan[proto]||[];
+    if (!rows.length) return '';
+    const sel = rows.filter(r=>r.enabled), unsel = rows.filter(r=>!r.enabled);
+    const cnt = planCounts(proto);
+    const mkRows = list => list.map(entry => {
+      const k = esc(planKey(entry));
+      return `<tr>
+        <td><input type="checkbox" data-pkey="${k}" ${entry.enabled?'checked':''}></td>
+        <td><span class="pill ${entry.enabled?'pill-run':'pill-skip'}">${entry.enabled?'RUN':'SKIP'}</span></td>
+        <td>${esc(entry.filename)}</td>
+        <td class="mono">${esc(entry.csv_column)}</td>
+        <td class="mono">${esc(entry.tag_name)}</td>
+        <td>${esc(entry.data_type)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="tag-section">
+      <div class="tag-section-hdr">
+        <span>${proto === 'opcua' ? 'OPC UA Tag Plan' : 'MQTT Tag Plan'}</span>
+        <span class="proto-badge">${cnt.sel} run / ${cnt.unsel} skip / ${cnt.total} total</span>
+      </div>
+      <div class="tag-section-body">
+        <div class="tbl-wrap" style="max-height:220px">
+          <table><thead><tr><th>Run</th><th>Status</th><th>File</th><th>Column</th><th>Tag Name</th><th>Type</th></tr></thead>
+          <tbody>${mkRows(sel)}${unsel.length?`<tr><td colspan="6" style="background:var(--bg3);font-size:10px;padding:4px 8px;color:var(--muted)">── Not Run ──</td></tr>`:''}${mkRows(unsel)}</tbody></table>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-pkey]').forEach(cb => cb.addEventListener('change', e => {
+    const k = e.target.dataset.pkey;
+    for (const proto of ['opcua','mqtt']) {
+      const entry = S.tagPlan[proto].find(x=>planKey(x)===k);
+      if (entry) entry.enabled = e.target.checked;
+    }
+    S.replayMode = null;
+    renderTagPlan();
+  }));
+}
+function setAllProto(proto, en) {
+  if (!S.tagPlanBuilt) return msg('Build tag preview first.','warn');
+  S.tagPlan[proto].forEach(e=>e.enabled=en);
+  S.replayMode = null; renderTagPlan();
+}
+$('previewTagPlanBtn').addEventListener('click', () => buildTagPlan().catch(e=>msg(e.message,'error')));
+$('selAllOpc').addEventListener('click',  () => setAllProto('opcua',true));
+$('clrOpc').addEventListener('click',     () => setAllProto('opcua',false));
+$('selAllMqtt').addEventListener('click', () => setAllProto('mqtt',true));
+$('clrMqtt').addEventListener('click',    () => setAllProto('mqtt',false));
+
+// ── Apply configs ─────────────────────────────────────────
+async function applyManual() {
+  if (!S.selectedCsvFile) throw new Error('Load a file with Load Manual first.');
+  const cfg = {...commonReplayFields(), csv_file:S.selectedCsvFile.filename, csv_source:S.selectedCsvFile.source, tags:collectMappings()};
+  const d = await api('/api/replay/configure', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  S.replayConfig = cfg; S.replayMode = 'manual';
+  msg(`Manual config applied — ${d.tag_count} tags. Click Start.`, 'ok');
+  await refreshStatus();
+}
+async function applyProtocolPlans() {
+  if (!S.tagPlanBuilt || S.tagPlanDirty) await buildTagPlan(true);
+  const tagSel = [...S.tagPlan.opcua,...S.tagPlan.mqtt].map(e=>({protocol:e.protocol,filename:e.filename,source:e.source,csv_column:e.csv_column,enabled:!!e.enabled}));
+  const cfg = {...commonReplayFields(), files:fromSet(S.selectedShared), opcua_files:fromSet(S.selectedOpcua), mqtt_files:fromSet(S.selectedMqtt), tag_selections:tagSel};
+  const d = await api('/api/replay/configure-files', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  S.replayConfig = cfg; S.replayMode = 'protocol_plans';
+  const oc = planCounts('opcua'), mc = planCounts('mqtt');
+  msg(`Plans applied — ${d.tag_count} tags. OPC UA ${oc.sel} / MQTT ${mc.sel}. Click Start.`, 'ok');
+  await refreshStatus();
+}
+$('applyManualBtn').addEventListener('click', () => applyManual().catch(e=>msg(e.message,'error')));
+$('applyMultiBtn').addEventListener('click',  () => applyProtocolPlans().catch(e=>msg(e.message,'error')));
+
+// ── Start / Stop ──────────────────────────────────────────
+async function startReplay() {
+  const hasFiles = S.selectedShared.size || S.selectedOpcua.size || S.selectedMqtt.size;
+  if (!S.selectedCsvFile && hasFiles && S.replayMode !== 'protocol_plans') {
+    if (!S.tagPlanBuilt || S.tagPlanDirty) { await buildTagPlan(true); }
+    msg('Apply Protocol Plans first, then Start.', 'warn'); return;
+  }
+  await api('/api/replay/start', {method:'POST'});
+  msg('Replay started.', 'ok'); await refreshStatus();
+}
+async function stopReplay()    { await api('/api/replay/stop',         {method:'POST'}); msg('Stopped.',  'ok'); await refreshStatus(); }
+async function restartReplay() { await api('/api/replay/restart',      {method:'POST'}); msg('Restarted.','ok'); await refreshStatus(); }
+async function resetCursor()   { await api('/api/replay/reset-cursor', {method:'POST'}); msg('Cursor reset.','ok'); await refreshStatus(); }
+
+$('startReplayBtn').addEventListener('click',  () => startReplay().catch(e=>msg(e.message,'error')));
+$('stopReplayBtn').addEventListener('click',   () => stopReplay().catch(e=>msg(e.message,'error')));
+$('restartReplayBtn').addEventListener('click',() => restartReplay().catch(e=>msg(e.message,'error')));
+$('resetCursorBtn').addEventListener('click',  () => resetCursor().catch(e=>msg(e.message,'error')));
+$('btnStart').addEventListener('click',        () => startReplay().catch(e=>msg(e.message,'error')));
+$('btnStop').addEventListener('click',         () => stopReplay().catch(e=>msg(e.message,'error')));
+$('btnRefresh').addEventListener('click',      () => refreshStatus().catch(e=>msg(e.message,'error')));
+
+// ── Current values ────────────────────────────────────────
+async function refreshCurrentValues() {
+  try {
+    const d = await api('/api/replay/current-values');
+    $('currentValues').innerHTML = mkTable(d.values, ['tag_name','node_id','value','data_type','last_updated']);
+  } catch(_) {}
+}
+
+// ── API sub-panels ────────────────────────────────────────
+function dbCfg() {
+  return {server:$('dbServer').value, port:$('dbPort').value, database:$('dbDatabase').value,
+    auth:$('dbAuth').value, username:$('dbUser').value, password:$('dbPass').value,
+    table:$('dbTable').value, encrypt:false, trust_server_certificate:true};
+}
+window.quickGet  = async p => { if(p.includes('stream')){window.open(API_BASE+p,'_blank');return;} const d=await api(API_BASE+p); $('apiResult').textContent=JSON.stringify(d,null,2); };
+window.quickPost = async (p,body) => { try{const d=await api(API_BASE+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(JSON.parse(body))}); $('apiResult').textContent=JSON.stringify(d,null,2);} catch(e){$('apiResult').textContent='Error: '+e.message;} };
+$('testDbBtn').addEventListener('click',    () => api('/mssql/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}).then(d=>$('connResult').textContent=JSON.stringify(d,null,2)).catch(e=>$('connResult').textContent='Error: '+e.message));
+$('writeCurrentBtn').addEventListener('click',() => api('/mssql/write-current',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}).then(d=>$('connResult').textContent=JSON.stringify(d,null,2)).catch(e=>$('connResult').textContent='Error: '+e.message));
+$('loadDbsBtn').addEventListener('click', () => api('/mssql/list-databases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}).then(d=>{if(d.databases){$('dbDatabase').innerHTML=d.databases.map(x=>`<option>${esc(x)}</option>`).join('');$('mapDatabase').innerHTML=$('dbDatabase').innerHTML;}$('connResult').textContent=JSON.stringify(d,null,2);}).catch(e=>$('connResult').textContent='Error: '+e.message));
+$('loadTablesBtn').addEventListener('click',() => api('/mssql/list-tables',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}).then(d=>{if(d.tables){$('dbTable').innerHTML=d.tables.map(x=>`<option>${esc(x)}</option>`).join('');$('mapTable').innerHTML=$('dbTable').innerHTML;}$('connResult').textContent=JSON.stringify(d,null,2);}).catch(e=>$('connResult').textContent='Error: '+e.message));
+
+// API mappings
+async function loadApiEndpoints() {
+  try {
+    const d = await api(API_BASE+'/api/studio/endpoints');
+    S.endpoints = d.data||[];
+    $('apiEndpoint').innerHTML = S.endpoints.map(e=>`<option value="${e.id}">${esc(e.method+' '+e.path+' — '+e.name)}</option>`).join('');
+    await loadMappings();
+  } catch(e) {}
+}
+async function loadMappings() {
+  const d = await api('/api-mappings'); S.mappings = d.mappings||[]; renderMappings();
+}
+function renderMappings() {
+  $('mappingsTable').innerHTML = mkTable(S.mappings, ['endpoint_name','method','path','source_type','database','table','excel','sheet']);
+}
+async function saveMapping() {
+  const ep = S.endpoints.find(e=>e.id===$('apiEndpoint').value)||{};
+  const m = {endpoint_id:$('apiEndpoint').value, endpoint_name:ep.name||'', method:ep.method||'', path:ep.path||'',
+    source_type:$('apiSource').value, database:$('mapDatabase').value, table:$('mapTable').value,
+    excel:$('mapExcel').value, sheet:$('mapSheet').value, updated_at:new Date().toISOString()};
+  const d = await api('/api-mappings/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(m)});
+  S.mappings=d.mappings||[]; renderMappings(); msg('Mapping saved.','ok');
+}
+$('saveMappingBtn').addEventListener('click', () => saveMapping().catch(e=>msg(e.message,'error')));
+
+// ── Launch / Control ──────────────────────────────────────
+function launchPorts() {
+  return {industrial_web_port:$('lpIndustrial').value, api_studio_port:$('lpApi').value,
+    portal_port:$('lpPortal').value, opcua_port:$('lpOpcua').value, mqtt_broker_port:$('lpMqtt').value};
+}
+function applyLaunchData(d) {
+  const p = d.ports||{};
+  if(p.industrial_web_port) $('lpIndustrial').value=p.industrial_web_port;
+  if(p.api_studio_port)     $('lpApi').value=p.api_studio_port;
+  if(p.portal_port)         $('lpPortal').value=p.portal_port;
+  if(p.opcua_port)          $('lpOpcua').value=p.opcua_port;
+  if(p.mqtt_broker_port)    $('lpMqtt').value=p.mqtt_broker_port;
+  const st = d.status||{};
+  $('launchStatusKv').innerHTML = Object.entries(st).map(([k,v])=>`<div class="kv-cell ${v?'ok':'bad'}"><div class="k">${esc(k)}</div><div class="v">${v?'ON':'OFF'}</div></div>`).join('');
+  const u = d.urls||{};
+  $('launchUrls').textContent = `Portal:      ${u.portal||'—'}\nIndustrial:  ${u.industrial||'—'}\nAPI Studio:  ${u.api_studio||'—'}\nOPC UA:      ${u.opcua||'—'}\nMQTT:        ${u.mqtt||'—'}`;
+  if(u.portal)    $('openPortal').href = u.portal;
+  if(u.api_studio) $('openApi').href   = u.api_studio;
+  if(u.api_studio) { $('apiFrame').src = u.api_studio; $('openApiStudio').href = u.api_studio; }
+}
+async function loadLaunchStatus() {
+  const d = await api('/launcher/config'); applyLaunchData(d);
+}
+$('savePorts').addEventListener('click',   () => api('/launcher/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:launchPorts()})}).then(applyLaunchData).catch(e=>msg(e.message,'error')));
+$('refreshLaunch').addEventListener('click',() => loadLaunchStatus().catch(e=>msg(e.message,'error')));
+$('launchStart').addEventListener('click', () => api('/launcher/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:launchPorts(),include_portal:false})}).then(d=>{applyLaunchData(d);setTimeout(refreshStatus,1200);}).catch(e=>msg(e.message,'error')));
+$('launchStop').addEventListener('click',  () => { if(!confirm('Stop all services?')) return; api('/launcher/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:launchPorts(),include_portal:false})}).then(d=>{applyLaunchData(d);setTimeout(refreshStatus,1200);}).catch(e=>msg(e.message,'error')); });
+$('launchOpenApp').addEventListener('click',() => api('/launcher/open-app',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:launchPorts()})}).then(applyLaunchData).catch(e=>msg(e.message,'error')));
+
+// ── Configs ───────────────────────────────────────────────
+async function refreshConfigs() {
+  const d = await api('/api/configs');
+  $('configsTable').innerHTML = mkTable(d.configs, ['name','description','created_at','modified_at'],
+    r => `<button class="btn btn-sm" onclick="loadConfig('${encodeURIComponent(r.name)}')">Load</button>
+          <button class="btn btn-sm btn-bad" onclick="deleteConfig('${encodeURIComponent(r.name)}')">Del</button>`);
+}
+function buildCfg() {
+  return {name:$('configName').value, description:$('configDesc').value, generator:S.lastGenReq,
+    csv:S.selectedCsvFile, replay:S.selectedCsvFile ? {...commonReplayFields(),csv_file:S.selectedCsvFile.filename,csv_source:S.selectedCsvFile.source,tags:collectMappings()} : S.replayConfig};
+}
+async function saveConfig() {
+  const c = buildCfg(); if(!c.name) throw new Error('Config name required.');
+  await api('/api/configs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});
+  msg(`Saved config: ${c.name}`,'ok'); await refreshConfigs();
+}
+window.loadConfig = async n => {
+  const name = decodeURIComponent(n); const c = await api(`/api/configs/${encodeURIComponent(name)}`);
+  $('configName').value = c.name; $('configDesc').value = c.description||'';
+  if(c.csv?.filename) await loadFileIntoReplay(encodeURIComponent(c.csv.filename), c.csv.source||'generated');
+  if(c.replay) {
+    $('protocolMode').value = c.replay.protocol||'opcua'; document.body.setAttribute('data-proto',c.replay.protocol||'opcua');
+    $('frequencyHz').value = c.replay.frequency_hz??1; $('loopMode').value=c.replay.loop_mode??'loop_forever';
+    $('timestampMode').value=c.replay.timestamp_mode??'wall_clock'; $('startRow').value=c.replay.start_row??0;
+    $('namespaceUri').value=c.replay.namespace_uri??'http://local/industrial-tag-simulator';
+    $('rootFolder').value=c.replay.root_folder??'TagSimulator'; $('nodePrefix').value=c.replay.node_id_prefix??'TagSimulator';
+    if(c.replay.tags) renderMappingTable(c.replay.tags);
+  }
+  msg(`Loaded config: ${name}`,'ok');
+};
+window.deleteConfig = async n => {
+  const name = decodeURIComponent(n);
+  await api(`/api/configs/${encodeURIComponent(name)}`,{method:'DELETE'});
+  msg(`Deleted ${name}`,'ok'); await refreshConfigs();
+};
+$('saveConfigBtn').addEventListener('click',   () => saveConfig().catch(e=>msg(e.message,'error')));
+$('exportConfigBtn').addEventListener('click', () => { const blob=new Blob([JSON.stringify(buildCfg(),null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`${$('configName').value||'ips-config'}.json`; a.click(); });
+$('importConfigBtn').addEventListener('click', () => $('importConfigInput').click());
+$('importConfigInput').addEventListener('change', async e => {
+  const f=e.target.files[0]; if(!f) return;
+  const c=JSON.parse(await f.text());
+  await api('/api/configs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});
+  await refreshConfigs(); msg(`Imported: ${c.name}`,'ok');
+});
+
+// ── Apply launcher config defaults ────────────────────────
+function applyLauncherDefaults() {
+  const c = window.SIMULATOR_LAUNCHER_CONFIG || {};
+  if(c.mqtt_host && $('mqttHost')) $('mqttHost').value=c.mqtt_host;
+  if(c.mqtt_port && $('mqttPort')) $('mqttPort').value=c.mqtt_port;
+  if(c.opcua_port && $('opcuaEndpoint')) $('opcuaEndpoint').value=`opc.tcp://localhost:${c.opcua_port}/simulator`;
+}
+
+// ── Init ──────────────────────────────────────────────────
+async function safeStep(fn, label) {
+  try { await fn(); } catch(e) { msg(`${label}: ${e.message}`, 'error'); }
+}
+
+async function init() {
+  applyLauncherDefaults();
+  renderTagPlan();
+  renderMappingTable([]);
+  await safeStep(loadGenerators,    'Generators');
+  await safeStep(refreshFiles,      'Files');
+  await safeStep(refreshConfigs,    'Configs');
+  await safeStep(loadLaunchStatus,  'Launcher');
+  await safeStep(loadApiEndpoints,  'API Endpoints');
+  await safeStep(refreshStatus,     'Status');
+  setInterval(() => refreshStatus().catch(()=>{}),        1000);
+  setInterval(() => refreshCurrentValues().catch(()=>{}), 1000);
+  setInterval(() => loadLaunchStatus().catch(()=>{}),     5000);
+}
+init().catch(e => msg(e.message,'error'));
+</script>
+</body>
+</html>
