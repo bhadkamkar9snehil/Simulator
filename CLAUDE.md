@@ -99,6 +99,25 @@ python scripts/acm_seed_demo.py --opcua opc.tcp://localhost:4840/simulator --db 
 
 ---
 
+## Mistakes Made in Earlier Sessions (Never Repeat)
+
+1. **Added `ACM_DIR` variable to `suite_runtime.py`** — an agent added an ACM directory variable and ACM chip to the portal HTML. All reverted. Zero ACM knowledge in this repo, ever.
+2. **Added ACM port to `launchPorts()`** in `simulator_proto.html` — reverted. Portal only knows about Simulator services.
+3. **MQTT-first integration** — an agent initially set up MQTT as the primary Simulator→ACM bridge and added ACM references to the Simulator. Reverted in full. OPC UA is the integration wire; it requires no changes to Simulator because Simulator was already publishing OPC UA.
+4. **Left `.bak` files in repo** — `portal/portal_app.py.bak` (43 KB) was a stale backup sitting alongside the 19 KB active file. Deleted.
+
+---
+
+## Key Internal Facts
+
+- `portal/portal_app.py` — 19 KB (the active file). Any `.bak` files are stale and should be deleted.
+- `industrial_simulator/frontend/index.html` — NOT vestigial. It is actively served by the FastAPI industrial_simulator service at `/`. Do not delete it.
+- `suite_runtime.py` is 27 KB; `DEFAULT_PORTS` has exactly 5 keys — do not add a 6th without updating all callers.
+- `portal/simulator_proto.html` is 85 KB monolithic — validate changes in a browser at http://localhost:8001.
+- The `launchPorts()` / `applyLaunchData()` / `launchUrls` functions in the HTML manage service links — do not add external (ACM) ports here.
+
+---
+
 ## Development Rules
 
 - Read code before proposing changes
