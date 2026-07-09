@@ -5,7 +5,7 @@ import os
 import sys
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from fastapi import UploadFile
 from .models import CsvMetadata, CsvFileRecord, CsvPreviewResponse, TagMapping
 from .type_inference import infer_types, sanitize_tag_name, is_default_disabled_column
@@ -108,22 +108,32 @@ def read_full_csv(filename: str, source: str, max_rows: int | None = None) -> tu
     return read_rows(resolve_csv_path(filename, source), max_rows=max_rows)
 
 
+_METADATA_CACHE: dict[tuple[str, int, float, int], CsvMetadata] = {}
+
+
 def metadata(filename: str, source: str, preview_rows: int = 10) -> CsvMetadata:
     path = resolve_csv_path(filename, source)
-    columns, rows = read_rows(path)
-    inferred = infer_types(rows, columns)
+    stat = path.stat()
+    cache_key = (str(path), stat.st_size, stat.st_mtime, preview_rows)
+    cached = _METADATA_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    columns, preview_rows_data, type_sample, row_count = scan_rows(path, preview_rows=preview_rows)
+    inferred = infer_types(type_sample, columns)
     mappings = default_tag_mappings(columns, inferred)
-    return CsvMetadata(
+    result = CsvMetadata(
         filename=path.name,
         source=source,  # type: ignore[arg-type]
-        row_count=len(rows),
+        row_count=row_count,
         column_count=len(columns),
         columns=columns,
-        preview=rows[:preview_rows],
+        preview=preview_rows_data,
         inferred_types=inferred,  # type: ignore[arg-type]
         modified_at=_mtime(path),
         default_tag_mappings=mappings,
     )
+    _METADATA_CACHE[cache_key] = result
+    return result
 
 
 def preview(filename: str, source: str, limit: int = 10) -> CsvPreviewResponse:
@@ -141,19 +151,23 @@ def save_upload(file: UploadFile) -> CsvMetadata:
     return metadata(safe, "uploaded")
 
 
-def write_rows(filename: str, rows: list[dict[str, Any]], source: str = "generated") -> Path:
+def write_rows(filename: str, rows: Iterable[dict[str, Any]], source: str = "generated") -> Path:
     ensure_dirs()
     if source not in SOURCE_DIRS:
         raise ValueError("Invalid output source.")
     safe = sanitize_filename(filename)
-    if not rows:
+    iterator = iter(rows)
+    try:
+        first_row = next(iterator)
+    except StopIteration:
         raise ValueError("No rows generated.")
     path = SOURCE_DIRS[source] / safe
-    fieldnames = list(rows[0].keys())
+    fieldnames = list(first_row.keys())
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerow(first_row)
+        writer.writerows(iterator)
     return path
 
 
@@ -163,13 +177,13 @@ def list_files() -> list[CsvFileRecord]:
     for source, directory in SOURCE_DIRS.items():
         for path in sorted(list(directory.glob("*.csv")) + list(directory.glob("*.xlsx"))):
             try:
-                columns, rows = read_rows(path)
+                meta = metadata(path.name, source)
                 records.append(CsvFileRecord(
                     filename=path.name,
                     source=source,  # type: ignore[arg-type]
                     path=str(path.relative_to(ROOT)),
-                    row_count=len(rows),
-                    column_count=len(columns),
+                    row_count=meta.row_count,
+                    column_count=meta.column_count,
                     modified_at=_mtime(path),
                 ))
             except Exception:
@@ -199,6 +213,31 @@ def default_tag_mappings(columns: list[str], inferred_types: dict[str, str], pre
             writable=False,
         ))
     return mappings
+
+
+def scan_rows(path: Path, preview_rows: int = 10, type_sample_size: int = 100) -> tuple[list[str], list[dict[str, str]], list[dict[str, str]], int]:
+    if path.suffix.lower() == ".xlsx":
+        columns, rows = read_xlsx_rows(path)
+        return columns, rows[:preview_rows], rows[:type_sample_size], len(rows)
+
+    with path.open("r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError("File has no header.")
+        columns = [c.strip() for c in reader.fieldnames]
+        if len(set(columns)) != len(columns):
+            raise ValueError("File has duplicate columns.")
+        preview: list[dict[str, str]] = []
+        type_sample: list[dict[str, str]] = []
+        row_count = 0
+        for row in reader:
+            normalized = {col: row.get(col, "") for col in columns}
+            if row_count < preview_rows:
+                preview.append(normalized)
+            if row_count < type_sample_size:
+                type_sample.append(normalized)
+            row_count += 1
+    return columns, preview, type_sample, row_count
 
 
 def _mtime(path: Path) -> str:

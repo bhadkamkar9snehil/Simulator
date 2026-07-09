@@ -9,3 +9,11 @@ simulator_ports.json
 app_window_profile/
 portal/data/
 AGENTS.md
+logs/
+outputs/
+releases/
+.pytest_cache/
+.hermes-nightly/
+sap_api_simulator/csv/
+*.tmp
+*.ndjson

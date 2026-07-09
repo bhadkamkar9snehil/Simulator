@@ -4,7 +4,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal", label="Normal Casting"),
@@ -110,7 +110,7 @@ class CcmGenerator(DomainGenerator):
             strand_surface_temp = 950.0 - 50.0 * (secondary_cooling / 800.0) + 100.0 * (casting_speed / nom_speed)
 
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(ts),
                 "scenario": request.scenario,
                 "operating_state": state,
                 "mold_level_pct": round(mold_level + rng.gauss(0, 1.0), 2),

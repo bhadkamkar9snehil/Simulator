@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plant SCADA: P&ID View</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Inter:wght@400;600&display=swap');
+        
+        body { background-color: #0b1120; color: #f8fafc; font-family: 'Inter', sans-serif; overflow: hidden; margin: 0; padding: 0; user-select: none; }
+        
+        /* SCADA / P&ID specific styles */
+        .pid-bg { background-color: #0f172a; background-image: radial-gradient(#334155 1px, transparent 1px); background-size: 20px 20px; }
+        
+        /* Animations */
+        .alarm-bubble { fill: #450a0a !important; stroke: #ef4444 !important; animation: pulse-stroke 1s infinite; }
+        .alarm-text { fill: #fca5a5 !important; }
+        .alarm-valbox { stroke: #ef4444 !important; background-color: rgba(69, 10, 10, 0.8) !important; }
+        
+        @keyframes pulse-stroke { 
+            0% { stroke-width: 1.5; filter: drop-shadow(0 0 2px #ef4444); } 
+            50% { stroke-width: 3; filter: drop-shadow(0 0 8px #ef4444); } 
+            100% { stroke-width: 1.5; filter: drop-shadow(0 0 2px #ef4444); } 
+        }
+
+        .flow-line { stroke-dasharray: 10, 10; animation: flow 2s linear infinite; }
+        @keyframes flow { to { stroke-dashoffset: -20; } }
+        .spin { transform-origin: center; animation: spin-anim 2s linear infinite; }
+        @keyframes spin-anim { 100% { transform: rotate(360deg); } }
+
+        /* UI */
+        .tab-btn { border-bottom: 2px solid transparent; }
+        .tab-btn.active { border-bottom: 2px solid #38bdf8; color: #38bdf8; background-color: #0f172a; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col">
+
+    <!-- Top Banner & Controls -->
+    <header class="h-16 bg-slate-900 border-b border-slate-700 flex flex-col z-20 shadow-lg">
+        <div class="flex items-center justify-between px-6 py-2 flex-1">
+            <div class="flex items-center gap-4">
+                <div class="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" id="system-status-led"></div>
+                <h1 class="text-lg font-bold text-slate-200 tracking-wider">HMI / P&ID OVERVIEW: <span id="current-area-title" class="text-sky-400">POY SPINNING</span></h1>
+            </div>
+            <div class="flex gap-4 items-center">
+                <!-- Global Plant Tags (System) displayed neatly in header -->
+                <div class="flex gap-4 mr-6 font-mono text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded border border-slate-700">
+                    <div>Line Spd: <span id="sys-line-spd" class="text-emerald-400 font-bold">100</span>%</div>
+                    <div>Util Stm: <span id="sys-stm" class="text-emerald-400 font-bold">12.5</span>b</div>
+                    <div>Inst Air: <span id="sys-air" class="text-emerald-400 font-bold">6.8</span>b</div>
+                </div>
+                <div class="flex gap-2 text-xs">
+                    <button onclick="setSimulationState('normal')" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded border border-slate-500 transition">Normal</button>
+                    <button onclick="setSimulationState('upset_press')" class="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 rounded border border-amber-500 transition text-white">Sim: Pressure Drop</button>
+                    <button onclick="setSimulationState('trip')" class="px-3 py-1.5 bg-red-800 hover:bg-red-700 rounded border border-red-500 transition text-white">Sim: Drive Trip</button>
+                </div>
+            </div>
+        </div>
+        <!-- Area Tabs -->
+        <div class="flex px-6 gap-1 bg-slate-900">
+            <button onclick="switchTab('POLY')" id="tab-btn-POLY" class="tab-btn px-6 py-1.5 text-sm font-semibold text-slate-400 rounded-t-lg transition-colors">Polymerization</button>
+            <button onclick="switchTab('POY')" id="tab-btn-POY" class="tab-btn active px-6 py-1.5 text-sm font-semibold text-slate-400 rounded-t-lg transition-colors">POY Spinning</button>
+            <button onclick="switchTab('DRAW')" id="tab-btn-DRAW" class="tab-btn px-6 py-1.5 text-sm font-semibold text-slate-400 rounded-t-lg transition-colors">Drawline</button>
+        </div>
+    </header>
+
+    <!-- Main SCADA/P&ID Canvas -->
+    <main class="flex-1 relative pid-bg overflow-auto" id="canvas-container">
+        
+        <!-- P&ID SVGs -->
+        <svg id="svg-POLY" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" class="absolute w-full h-full hidden">
+            <!-- Poly Static Equipment Graphics -->
+            <g stroke="#94a3b8" stroke-width="3" fill="none">
+                <!-- Pipes -->
+                <path d="M 200 300 L 400 300 L 400 450 L 550 450" />
+                <path d="M 550 650 L 750 650 L 750 800 L 900 800" />
+                <path d="M 1100 850 L 1300 850 L 1300 500 L 1500 500" />
+            </g>
+            <g fill="#334155" stroke="#f8fafc" stroke-width="2">
+                <!-- Silos & Reactors -->
+                <rect x="100" y="100" width="150" height="200" rx="10" />
+                <text x="175" y="200" fill="#f8fafc" font-size="20" font-family="sans-serif" text-anchor="middle" stroke="none">PTA SILO</text>
+                
+                <rect x="500" y="400" width="120" height="300" rx="60" />
+                <text x="560" y="550" fill="#f8fafc" font-size="20" font-family="sans-serif" text-anchor="middle" stroke="none" transform="rotate(-90 560 550)">1st ES</text>
+                
+                <rect x="850" y="700" width="300" height="200" rx="40" />
+                <text x="1000" y="800" fill="#f8fafc" font-size="24" font-family="sans-serif" text-anchor="middle" stroke="none">2nd ES</text>
+                
+                <rect x="1450" y="400" width="150" height="300" rx="20" />
+                <text x="1525" y="550" fill="#f8fafc" font-size="20" font-family="sans-serif" text-anchor="middle" stroke="none" transform="rotate(-90 1525 550)">FINISHER</text>
+            </g>
+            <!-- Instruments inserted here by JS -->
+            <g id="instruments-POLY"></g>
+        </svg>
+
+        <svg id="svg-POY" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1200" class="absolute w-full h-full">
+            <!-- POY Static Equipment -->
+            <g stroke="#94a3b8" stroke-width="4" fill="none">
+                <path d="M 100 200 L 500 200" class="flow-line" stroke="#d946ef" stroke-width="6" /> <!-- Melt -->
+                <path d="M 500 200 L 700 200 L 700 350" stroke="#d946ef" stroke-width="6" />
+                <path d="M 500 200 L 1100 200 L 1100 350" stroke="#d946ef" stroke-width="6" />
+                
+                <path d="M 700 400 L 700 900" stroke="#f8fafc" stroke-width="2" class="flow-line" /> <!-- Yarn A -->
+                <path d="M 1100 400 L 1100 900" stroke="#f8fafc" stroke-width="2" class="flow-line" /> <!-- Yarn B -->
+            </g>
+            
+            <g fill="#1e293b" stroke="#cbd5e1" stroke-width="2">
+                <!-- Extruder -->
+                <polygon points="100,160 450,160 480,180 480,220 450,240 100,240" />
+                <text x="250" y="205" fill="#f8fafc" font-size="18" font-family="sans-serif" text-anchor="middle" stroke="none">EXTRUDER</text>
+                
+                <!-- Spin Beams -->
+                <rect x="620" y="350" width="160" height="50" rx="5" />
+                <text x="700" y="380" fill="#f8fafc" font-size="16" font-family="sans-serif" text-anchor="middle" stroke="none">SPIN BEAM A</text>
+                <rect x="1020" y="350" width="160" height="50" rx="5" />
+                <text x="1100" y="380" fill="#f8fafc" font-size="16" font-family="sans-serif" text-anchor="middle" stroke="none">SPIN BEAM B</text>
+
+                <!-- Quench -->
+                <rect x="620" y="430" width="160" height="200" fill="#334155" />
+                <text x="700" y="530" fill="#94a3b8" font-size="20" font-family="sans-serif" text-anchor="middle" stroke="none">QUENCH A</text>
+                <rect x="1020" y="430" width="160" height="200" fill="#334155" />
+                <text x="1100" y="530" fill="#94a3b8" font-size="20" font-family="sans-serif" text-anchor="middle" stroke="none">QUENCH B</text>
+
+                <!-- Godets & Winders -->
+                <circle cx="650" cy="720" r="20" class="spin" style="animation-duration: 0.5s" />
+                <circle cx="750" cy="770" r="20" class="spin" style="animation-duration: 0.5s" />
+                <rect x="640" y="850" width="120" height="80" rx="10" />
+                <text x="700" y="895" fill="#f8fafc" font-size="16" font-family="sans-serif" text-anchor="middle" stroke="none">WINDER A</text>
+                
+                <circle cx="1050" cy="720" r="20" class="spin" style="animation-duration: 0.5s" />
+                <circle cx="1150" cy="770" r="20" class="spin" style="animation-duration: 0.5s" />
+                <rect x="1040" y="850" width="120" height="80" rx="10" />
+                <text x="1100" y="895" fill="#f8fafc" font-size="16" font-family="sans-serif" text-anchor="middle" stroke="none">WINDER B</text>
+            </g>
+            <g id="instruments-POY"></g>
+        </svg>
+
+        <svg id="svg-DRAW" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1200" class="absolute w-full h-full hidden">
+            <!-- DRAWLINE Static Equipment -->
+            <g stroke="#f8fafc" stroke-width="2" fill="none">
+                <path d="M 200 450 L 350 450 L 550 450 L 800 450 L 1050 450 L 1300 450 L 1700 450 L 1950 450 L 1950 750" class="flow-line" />
+            </g>
+            <g fill="#1e293b" stroke="#cbd5e1" stroke-width="2">
+                <!-- Creel -->
+                <rect x="100" y="300" width="100" height="300" />
+                <text x="150" y="450" fill="#f8fafc" font-size="20" font-family="sans-serif" text-anchor="middle" stroke="none" transform="rotate(-90 150 450)">CREEL</text>
+                
+                <!-- Bath -->
+                <path d="M 300 420 L 300 520 L 420 520 L 420 420" />
+                <text x="360" y="480" fill="#f8fafc" font-size="14" font-family="sans-serif" text-anchor="middle" stroke="none">FINISH BATH</text>
+                
+                <!-- Heated Rolls -->
+                <circle cx="550" cy="450" r="60" fill="#7c2d12" stroke="#fdba74" stroke-width="3" class="spin" style="animation-duration: 3s"/>
+                <text x="550" y="455" fill="#f8fafc" font-size="18" font-family="sans-serif" text-anchor="middle" stroke="none">DRAW ROLL 1</text>
+                
+                <circle cx="800" cy="450" r="80" fill="#7c2d12" stroke="#fdba74" stroke-width="3" class="spin" style="animation-duration: 1s"/>
+                <text x="800" y="455" fill="#f8fafc" font-size="18" font-family="sans-serif" text-anchor="middle" stroke="none">DRAW ROLL 2</text>
+                
+                <!-- Crimper -->
+                <rect x="1020" y="410" width="80" height="80" rx="5" />
+                <text x="1060" y="455" fill="#f8fafc" font-size="14" font-family="sans-serif" text-anchor="middle" stroke="none">CRIMPER</text>
+                
+                <!-- Oven -->
+                <rect x="1200" y="350" width="400" height="200" rx="10" fill="#451a03" />
+                <text x="1400" y="455" fill="#f8fafc" font-size="24" font-family="sans-serif" text-anchor="middle" stroke="none">RELAXATION OVEN</text>
+                
+                <!-- Cutter & Baler -->
+                <circle cx="1700" cy="450" r="40" class="spin" style="animation-duration: 0.2s" />
+                <text x="1700" y="520" fill="#f8fafc" font-size="14" font-family="sans-serif" text-anchor="middle" stroke="none">CUTTER</text>
+                
+                <rect x="1900" y="750" width="100" height="150" rx="5" />
+                <text x="1950" y="830" fill="#f8fafc" font-size="18" font-family="sans-serif" text-anchor="middle" stroke="none">BALER</text>
+            </g>
+            <g id="instruments-DRAW"></g>
+        </svg>
+
+        <!-- Alarm Banner (Floating) -->
+        <div class="absolute bottom-6 right-6 w-96 bg-slate-900 border border-slate-700 rounded shadow-2xl flex flex-col z-30 opacity-95">
+            <div class="bg-slate-800 px-4 py-2 border-b border-slate-700 font-bold text-sm text-slate-300 flex justify-between items-center rounded-t">
+                <span>SYSTEM ALARMS</span>
+                <span id="alarm-count" class="bg-slate-700 text-xs px-2 py-0.5 rounded-full">0</span>
+            </div>
+            <div id="alarm-list" class="p-2 overflow-y-auto text-xs font-mono text-slate-400 space-y-1 h-32">
+                <div class="text-slate-500 italic p-1">No active alarms.</div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // ---------------------------------------------------------
+        // DATA MODEL & ISA TAG GENERATOR
+        // ---------------------------------------------------------
+        const tags = [];
+        
+        // Helper to generate ISA tags with coordinates for the SVG
+        // x, y = bubble center. lineDir = direction of the dashed line to the process (up, down, left, right)
+        function addTag(id, area, func, loop, desc, val, min, max, unit, x, y, lineDir) {
+            tags.push({
+                id, area, func, loop, desc, val, sp: val, min, max, unit, x, y, lineDir,
+                inAlarm: false, alarmText: `${func}-${loop}: ${desc} Limit`
+            });
+        }
+
+        // ==========================================
+        // POY TAGS (Mapped precisely to Extruder, Beams, Quench, Winders)
+        // ==========================================
+        // Extruder (Zones 1-6 Temps, Press, Speed, Amp)
+        addTag('POY_T1', 'POY', 'TIC', '301', 'Ext Z1 Temp', 280, 270, 290, '°C', 150, 60, 'down');
+        addTag('POY_T2', 'POY', 'TIC', '302', 'Ext Z2 Temp', 285, 275, 295, '°C', 200, 60, 'down');
+        addTag('POY_T3', 'POY', 'TIC', '303', 'Ext Z3 Temp', 290, 280, 300, '°C', 250, 60, 'down');
+        addTag('POY_T4', 'POY', 'TIC', '304', 'Ext Z4 Temp', 292, 282, 302, '°C', 300, 60, 'down');
+        addTag('POY_T5', 'POY', 'TIC', '305', 'Ext Z5 Temp', 295, 285, 305, '°C', 350, 60, 'down');
+        addTag('POY_T6', 'POY', 'TIC', '306', 'Ext Z6 Temp', 295, 285, 305, '°C', 400, 60, 'down');
+        addTag('POY_P1', 'POY', 'PIC', '307', 'Melt Press', 150, 130, 170, 'bar', 480, 60, 'down');
+        addTag('POY_S1', 'POY', 'SIC', '308', 'Extruder Speed', 85, 70, 100, 'rpm', 50, 280, 'right');
+        addTag('POY_I1', 'POY', 'IIC', '309', 'Extruder Amp', 140, 100, 180, 'A', 150, 310, 'up');
+        
+        // Manifold
+        addTag('POY_MP1', 'POY', 'PT', '310', 'Main Hdr Press', 145, 125, 165, 'bar', 600, 100, 'down');
+        addTag('POY_MT1', 'POY', 'TT', '311', 'Main Hdr Temp', 294, 285, 305, '°C', 700, 100, 'down');
+        addTag('POY_MDP1', 'POY', 'PDT', '312', 'Filter A DP', 45, 20, 80, 'bar', 800, 100, 'down');
+        
+        // Beam A
+        addTag('POY_BA_T', 'POY', 'TIC', '314', 'Beam A Temp', 292, 285, 298, '°C', 540, 375, 'right');
+        addTag('POY_BA_P', 'POY', 'PI', '315', 'Pack A Press', 180, 150, 210, 'bar', 540, 420, 'up');
+        addTag('POY_BA_S', 'POY', 'SIC', '316', 'Pump A Speed', 30, 25, 35, 'rpm', 860, 360, 'left');
+        addTag('POY_BA_F', 'POY', 'FI', '317', 'Poly Flow A', 150, 120, 180, 'kgh', 860, 410, 'up');
+        
+        // Beam B
+        addTag('POY_BB_T', 'POY', 'TIC', '318', 'Beam B Temp', 292, 285, 298, '°C', 940, 375, 'right');
+        addTag('POY_BB_P', 'POY', 'PI', '319', 'Pack B Press', 182, 150, 210, 'bar', 940, 420, 'up');
+        addTag('POY_BB_S', 'POY', 'SIC', '320', 'Pump B Speed', 30, 25, 35, 'rpm', 1260, 360, 'left');
+        
+        // Quench & Finish
+        addTag('POY_QA_F', 'POY', 'FIC', '324', 'Quench A Flow', 55, 45, 65, 'm3h', 520, 500, 'right');
+        addTag('POY_QA_T', 'POY', 'TIC', '325', 'Quench A Temp', 22, 18, 26, '°C', 520, 560, 'right');
+        addTag('POY_QA_P', 'POY', 'PIC', '326', 'Quench A Press', 15, 10, 20, 'mb', 520, 620, 'right');
+        addTag('POY_QB_F', 'POY', 'FIC', '327', 'Quench B Flow', 54, 45, 65, 'm3h', 1260, 500, 'left');
+        
+        addTag('POY_FA_F', 'POY', 'FIC', '330', 'Finish Flow A', 2.5, 1.5, 3.5, 'lh', 780, 650, 'left');
+        
+        // Godets & Winder A
+        addTag('POY_G1A_S', 'POY', 'SIC', '332', 'Godet 1A Spd', 3200, 3000, 3400, 'mpm', 550, 720, 'right');
+        addTag('POY_G2A_S', 'POY', 'SIC', '333', 'Godet 2A Spd', 3220, 3000, 3420, 'mpm', 850, 770, 'left');
+        addTag('POY_WA_S', 'POY', 'SIC', '334', 'Winder A Spd', 3250, 3000, 3500, 'mpm', 520, 890, 'right');
+        addTag('POY_WA_T', 'POY', 'WIC', '335', 'Winder A Tens', 12, 8, 16, 'cN', 520, 950, 'up');
+        
+        // Godets & Winder B
+        addTag('POY_G1B_S', 'POY', 'SIC', '337', 'Godet 1B Spd', 3200, 3000, 3400, 'mpm', 950, 720, 'right');
+        addTag('POY_WB_S', 'POY', 'SIC', '339', 'Winder B Spd', 3250, 3000, 3500, 'mpm', 920, 890, 'right');
+
+
+        // ==========================================
+        // DRAWLINE TAGS (Mapped to Creel, Bath, Rolls, Crimper, Oven, Cutter, Baler)
+        // ==========================================
+        addTag('DRW_CR_T', 'DRAW', 'WIC', '401', 'Creel Tension', 25, 15, 35, 'cN', 150, 180, 'down');
+        
+        addTag('DRW_BT_T', 'DRAW', 'TIC', '402', 'Bath Temp', 45, 35, 55, '°C', 360, 320, 'down');
+        addTag('DRW_BT_L', 'DRAW', 'LIC', '403', 'Bath Level', 60, 40, 80, '%', 360, 600, 'up');
+        
+        // Draw Rolls
+        addTag('DRW_R1_S', 'DRAW', 'SIC', '404', 'Roll 1 Speed', 100, 90, 110, 'mpm', 550, 280, 'down');
+        addTag('DRW_R1_T', 'DRAW', 'TIC', '405', 'Roll 1 Temp', 80, 70, 90, '°C', 550, 620, 'up');
+        addTag('DRW_R1_I', 'DRAW', 'IIC', '406', 'Roll 1 Amp', 45, 20, 70, 'A', 650, 320, 'left');
+        addTag('DRW_R1_V', 'DRAW', 'VIC', '407', 'Roll 1 Vib', 1.2, 0.5, 2.5, 'mms', 650, 580, 'left');
+        
+        addTag('DRW_R2_S', 'DRAW', 'SIC', '408', 'Roll 2 Speed', 300, 270, 330, 'mpm', 800, 260, 'down');
+        addTag('DRW_R2_T', 'DRAW', 'TIC', '409', 'Roll 2 Temp', 140, 130, 150, '°C', 800, 640, 'up');
+        addTag('DRW_R2_I', 'DRAW', 'IIC', '410', 'Roll 2 Amp', 85, 50, 120, 'A', 920, 320, 'left');
+        
+        // Crimper
+        addTag('DRW_CR_S', 'DRAW', 'SIC', '412', 'Crimper Spd', 305, 275, 335, 'mpm', 1060, 280, 'down');
+        addTag('DRW_CR_P', 'DRAW', 'PIC', '413', 'Box Press', 2.5, 1.8, 3.2, 'bar', 1060, 560, 'up');
+        addTag('DRW_CR_SP', 'DRAW', 'PIC', '414', 'Stm Press', 1.5, 1.0, 2.0, 'bar', 950, 500, 'right');
+        addTag('DRW_CR_Q', 'DRAW', 'QIC', '416', 'Crimp Freq', 12, 9, 15, 'cpi', 1150, 500, 'left');
+        
+        // Oven
+        addTag('DRW_OV_S', 'DRAW', 'SIC', '417', 'Belt Speed', 15, 10, 20, 'mpm', 1400, 220, 'down');
+        addTag('DRW_OV_T1', 'DRAW', 'TIC', '418', 'Z1 Temp', 130, 120, 140, '°C', 1250, 640, 'up');
+        addTag('DRW_OV_F1', 'DRAW', 'FIC', '419', 'Z1 Flow', 80, 60, 100, '%', 1250, 710, 'up');
+        addTag('DRW_OV_T3', 'DRAW', 'TIC', '420', 'Z3 Temp', 132, 120, 140, '°C', 1450, 640, 'up');
+        addTag('DRW_OV_E', 'DRAW', 'SIC', '422', 'Exhaust Fan', 1450, 1200, 1600, 'rpm', 1550, 260, 'down');
+        
+        // Cutter & Baler
+        addTag('DRW_CU_S', 'DRAW', 'SIC', '423', 'Cutter Speed', 600, 500, 700, 'rpm', 1700, 280, 'down');
+        addTag('DRW_BA_P', 'DRAW', 'PIC', '425', 'Hydr Press', 150, 100, 180, 'bar', 1800, 825, 'right');
+        addTag('DRW_BA_W', 'DRAW', 'WIC', '426', 'Bale Weight', 400, 380, 420, 'kg', 2100, 825, 'left');
+
+        // Poly tags (A few representative tags to maintain requested structure size)
+        addTag('POL_S1', 'POLY', 'LIC', '101', 'Silo Level', 50, 20, 90, '%', 175, 400, 'up');
+        addTag('POL_R1', 'POLY', 'TIC', '201', '1st ES Temp', 260, 250, 270, '°C', 400, 550, 'right');
+        addTag('POL_R2', 'POLY', 'PIC', '202', '1st ES Press', 1.2, 1.0, 1.4, 'bar', 700, 550, 'left');
+        addTag('POL_F1', 'POLY', 'TIC', '250', 'Finisher Temp', 285, 275, 295, '°C', 1680, 550, 'left');
+
+
+        // ---------------------------------------------------------
+        // SVG GENERATION ENGINE (Translates data into P&ID DOM)
+        // ---------------------------------------------------------
+        function drawInstruments() {
+            ['POLY', 'POY', 'DRAW'].forEach(area => {
+                const group = document.getElementById(`instruments-${area}`);
+                if (!group) return;
+                
+                const areaTags = tags.filter(t => t.area === area);
+                let svgContent = '';
+
+                areaTags.forEach(t => {
+                    // Determine line coordinates based on direction
+                    let lx2 = 0, ly2 = 0;
+                    if(t.lineDir === 'down') ly2 = 60;
+                    if(t.lineDir === 'up') ly2 = -60;
+                    if(t.lineDir === 'right') lx2 = 60;
+                    if(t.lineDir === 'left') lx2 = -60;
+
+                    svgContent += `
+                    <g transform="translate(${t.x}, ${t.y})" id="grp_${t.id}" class="transition-all duration-300">
+                        <!-- Instrument signal line -->
+                        <line x1="0" y1="0" x2="${lx2}" y2="${ly2}" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4,4" />
+                        
+                        <!-- ISA Bubble -->
+                        <circle cx="0" cy="0" r="22" fill="#1e293b" stroke="#f8fafc" stroke-width="1.5" class="bubble-shape" />
+                        <line x1="-22" y1="0" x2="22" y2="0" stroke="#f8fafc" stroke-width="1" class="bubble-line" />
+                        <text x="0" y="-4" font-size="12" font-family="sans-serif" font-weight="bold" text-anchor="middle" fill="#f8fafc" class="bubble-txt">${t.func}</text>
+                        <text x="0" y="14" font-size="12" font-family="sans-serif" text-anchor="middle" fill="#f8fafc" class="bubble-txt">${t.loop}</text>
+                        
+                        <!-- Value Display Box -->
+                        <rect x="25" y="-28" width="60" height="24" rx="2" fill="#0f172a" stroke="#334155" stroke-width="1" class="val-box" />
+                        <text x="55" y="-12" font-size="14" font-family="'Roboto Mono', monospace" font-weight="bold" text-anchor="middle" fill="#4ade80" id="val_${t.id}">${t.val.toFixed(1)}</text>
+                        
+                        <!-- Unit -->
+                        <rect x="25" y="-4" width="60" height="14" rx="2" fill="#1e293b" />
+                        <text x="55" y="6" font-size="10" font-family="sans-serif" text-anchor="middle" fill="#94a3b8">${t.unit}</text>
+                    </g>
+                    `;
+                });
+                group.innerHTML = svgContent;
+            });
+        }
+
+        // ---------------------------------------------------------
+        // SIMULATION & UI LOGIC
+        // ---------------------------------------------------------
+        let activeTab = 'POY';
+        let simulationState = 'normal';
+        let activeAlarms = new Set();
+        
+        function switchTab(area) {
+            activeTab = area;
+            const titles = { 'POLY': 'POLYMERIZATION', 'POY': 'POY SPINNING', 'DRAW': 'DRAWLINE' };
+            document.getElementById('current-area-title').innerText = titles[area];
+
+            ['POLY', 'POY', 'DRAW'].forEach(a => {
+                const btn = document.getElementById(`tab-btn-${a}`);
+                const svg = document.getElementById(`svg-${a}`);
+                if(a === area) {
+                    btn.classList.add('active');
+                    if(svg) svg.classList.remove('hidden');
+                } else {
+                    btn.classList.remove('active');
+                    if(svg) svg.classList.add('hidden');
+                }
+            });
+        }
+
+        function setSimulationState(state) {
+            simulationState = state;
+            const led = document.getElementById('system-status-led');
+            if(state === 'normal') led.className = "w-3 h-3 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]";
+            else if (state === 'upset_press') led.className = "w-3 h-3 rounded-full bg-yellow-500 shadow-[0_0_8px_#eab308]";
+            else if (state === 'trip') led.className = "w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse";
+        }
+
+        function updateAlarmsUI() {
+            const list = document.getElementById('alarm-list');
+            const countBadge = document.getElementById('alarm-count');
+            countBadge.innerText = activeAlarms.size;
+            
+            if(activeAlarms.size === 0) {
+                list.innerHTML = '<div class="text-slate-500 italic p-1">System optimal. No active interlocks.</div>';
+                countBadge.className = "bg-slate-700 text-xs px-2 py-0.5 rounded-full";
+            } else {
+                countBadge.className = "bg-red-600 text-white font-bold text-xs px-2 py-0.5 rounded-full animate-pulse";
+                list.innerHTML = Array.from(activeAlarms).map(alarm => 
+                    `<div class="p-1.5 bg-red-900/40 border-l-2 border-red-500 mb-1 text-red-200 uppercase flex justify-between">
+                        <span><span class="font-bold mr-2">SYS:</span> ${alarm}</span>
+                        <span class="text-[0.6rem] bg-red-950 px-1 rounded">HI/LO</span>
+                    </div>`
+                ).join('');
+            }
+        }
+
+        function runSimulation() {
+            let alarmsChanged = false;
+
+            tags.forEach(t => {
+                // Natural process noise
+                let noise = (Math.random() - 0.5) * (t.sp * 0.015);
+                
+                // Fault Injection
+                if (simulationState === 'upset_press') {
+                    if (t.func === 'PIC' || t.func === 'PI') t.val *= 0.95; // Pressure drops slowly
+                    if (t.func === 'TIC') noise += 0.5; // Temps rise slightly due to loss of cooling flow
+                }
+                if (simulationState === 'trip') {
+                    if (t.func === 'SIC') {
+                        t.val *= 0.80; // Speeds drop immediately
+                        noise = 0;
+                    }
+                    if (t.func === 'IIC') {
+                        t.val = 0; // Amps drop to 0
+                        noise = 0;
+                    }
+                }
+                if (simulationState === 'normal') {
+                    t.val += (t.sp - t.val) * 0.1; // Recovery
+                }
+
+                t.val += noise;
+
+                // Alarm evaluation
+                const isOutOfBounds = (t.val > t.max || t.val < t.min);
+                if(isOutOfBounds !== t.inAlarm) {
+                    t.inAlarm = isOutOfBounds;
+                    alarmsChanged = true;
+                    if(t.inAlarm) activeAlarms.add(t.alarmText);
+                    else activeAlarms.delete(t.alarmText);
+                    
+                    // Update P&ID SVG styling classes for this specific tag
+                    const grp = document.getElementById(`grp_${t.id}`);
+                    if(grp) {
+                        const bubble = grp.querySelector('.bubble-shape');
+                        const line = grp.querySelector('.bubble-line');
+                        const txts = grp.querySelectorAll('.bubble-txt');
+                        const vBox = grp.querySelector('.val-box');
+                        
+                        if(t.inAlarm) {
+                            bubble.classList.add('alarm-bubble');
+                            line.classList.add('alarm-bubble');
+                            txts.forEach(txt => txt.classList.add('alarm-text'));
+                            vBox.classList.add('alarm-valbox');
+                        } else {
+                            bubble.classList.remove('alarm-bubble');
+                            line.classList.remove('alarm-bubble');
+                            txts.forEach(txt => txt.classList.remove('alarm-text'));
+                            vBox.classList.remove('alarm-valbox');
+                        }
+                    }
+                }
+
+                // Update DOM text
+                const valEl = document.getElementById(`val_${t.id}`);
+                if (valEl) {
+                    valEl.innerText = (t.val % 1 !== 0) ? t.val.toFixed(1) : t.val.toFixed(0);
+                    valEl.setAttribute('fill', t.inAlarm ? '#fca5a5' : '#4ade80');
+                }
+            });
+
+            // Minor jitter on system global tags
+            document.getElementById('sys-line-spd').innerText = (100 + (Math.random()-0.5)).toFixed(1);
+            document.getElementById('sys-stm').innerText = (12.5 + (Math.random()-0.5)*0.2).toFixed(1);
+            
+            if(alarmsChanged) updateAlarmsUI();
+        }
+
+        // Initialize App
+        drawInstruments();
+        switchTab('POY'); // Start on POY Schematic
+        setInterval(runSimulation, 1000); // 1 second loop
+
+    </script>
+</body>
+</html>

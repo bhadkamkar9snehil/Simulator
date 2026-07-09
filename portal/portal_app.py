@@ -10,7 +10,7 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -27,6 +27,8 @@ from suite_runtime import (
     open_app_window as suite_open_app_window,
     VENV_PYW as SUITE_VENV_PYW,
     VENV_PY as SUITE_VENV_PY,
+    clear_log as suite_clear_log,
+    logs_payload as suite_logs_payload,
 )
 
 
@@ -171,7 +173,7 @@ def current_industrial_rows() -> list[dict]:
     return rows
 
 def page() -> str:
-        template_path = ROOT / "portal" / "simulator_proto.html"
+        template_path = ROOT / "portal" / "simulator_ui.html"
         template = template_path.read_text(encoding="utf-8")
 
         config = {
@@ -183,12 +185,12 @@ def page() -> str:
             "mqtt_host": "localhost",
             "lan_ip": local_ip(),
         }
-        config_script = (
-            "<script>"
-            f"window.SIMULATOR_LAUNCHER_CONFIG = {json.dumps(config)};"
-            "</script>"
-        )
-        template = template.replace("<script>", config_script + "\n<script>", 1)
+        config_assignment = f"window.SIMULATOR_LAUNCHER_CONFIG = {json.dumps(config)};"
+        placeholder = "window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};"
+        if placeholder in template:
+            template = template.replace(placeholder, config_assignment, 1)
+        else:
+            template = template.replace("<body>", f"<body>\n<script>{config_assignment}</script>", 1)
 
         replacements = {
             'href="http://127.0.0.1:5050"': f'href="http://127.0.0.1:{API_STUDIO_PORT}"',
@@ -204,156 +206,6 @@ def page() -> str:
         for old, new in replacements.items():
             template = template.replace(old, new)
 
-        boot_patch = r"""
-const __ipsOrigRefreshStatus = refreshStatus;
-const __ipsOrigLoadGenerators = loadGenerators;
-const __ipsOrigRefreshFiles = refreshFiles;
-const __ipsOrigLoadApiEndpoints = loadApiEndpoints;
-const __ipsOrigRefreshConfigs = refreshConfigs;
-const __ipsOrigRefreshCurrentValues = refreshCurrentValues;
-let __ipsIndustrialReady = false;
-let __ipsApiReady = false;
-let __ipsIndustrialLoaded = false;
-let __ipsApiLoaded = false;
-let __ipsConfigLoaded = false;
-
-function __ipsSetText(id, text) {
-  const el = $(id);
-  if (el) el.textContent = text;
-}
-
-function __ipsSetHtml(id, html) {
-  const el = $(id);
-  if (el) el.innerHTML = html;
-}
-
-function __ipsApplyIndustrialWaiting(text) {
-  __ipsSetText('genSummary', text);
-  __ipsSetHtml('genPreview', '<div class="hint" style="padding:8px">Waiting for Industrial backend.</div>');
-  __ipsSetHtml('filesTable', '<div class="hint" style="padding:8px">Waiting for Industrial backend. Bundled sample files will appear automatically.</div>');
-  __ipsSetText('filePreviewMeta', 'Waiting for Industrial backend.');
-  __ipsSetHtml('filePreview', '<div class="hint" style="padding:8px">Preview will load automatically when Industrial is ready.</div>');
-  __ipsSetHtml('fileMetaKv', '');
-  __ipsSetHtml('mappingTable', '<div class="hint" style="padding:8px">No file loaded. Use Load Manual in Files when Industrial is ready.</div>');
-  __ipsSetHtml('configsTable', '<div class="hint" style="padding:8px">Waiting for Industrial backend configs.</div>');
-  __ipsSetHtml('currentValues', '<div class="hint" style="padding:8px">Waiting for Industrial backend current values.</div>');
-  __ipsSetText('rawStatus', JSON.stringify({ state: text }, null, 2));
-}
-
-function __ipsApplyApiWaiting(text) {
-  __ipsSetText('apiResult', text);
-  __ipsSetHtml('mappingsTable', '<div class="hint" style="padding:8px">Waiting for API Studio backend.</div>');
-  const apiEndpoint = $('apiEndpoint');
-  if (apiEndpoint) apiEndpoint.innerHTML = '';
-}
-
-loadGenerators = async function() {
-  if (!__ipsIndustrialReady) {
-    __ipsApplyIndustrialWaiting('Industrial backend starting. Generator catalog will load automatically.');
-    return;
-  }
-  return __ipsOrigLoadGenerators();
-};
-
-refreshFiles = async function() {
-  if (!__ipsIndustrialReady) {
-    __ipsApplyIndustrialWaiting('Industrial backend starting. Built-in files will appear automatically.');
-    return;
-  }
-  return __ipsOrigRefreshFiles();
-};
-
-refreshConfigs = async function() {
-  if (!__ipsIndustrialReady) {
-    __ipsSetHtml('configsTable', '<div class="hint" style="padding:8px">Waiting for Industrial backend configs.</div>');
-    return;
-  }
-  return __ipsOrigRefreshConfigs();
-};
-
-refreshCurrentValues = async function() {
-  if (!__ipsIndustrialReady) return;
-  return __ipsOrigRefreshCurrentValues();
-};
-
-loadApiEndpoints = async function() {
-  if (!__ipsApiReady) {
-    __ipsApplyApiWaiting('API Studio backend starting. Endpoint catalog will load automatically.');
-    return;
-  }
-  return __ipsOrigLoadApiEndpoints();
-};
-
-refreshStatus = async function() {
-  const suiteResp = await fetch('/suite/status');
-  let suite = {};
-  try { suite = await suiteResp.json(); } catch (_) {}
-  if (!suiteResp.ok) throw new Error('Could not load suite status.');
-
-  const industrialOk = !!(suite.industrial && suite.industrial.ok);
-  const apiOk = !!(suite.api_studio && suite.api_studio.ok);
-
-  if (!industrialOk) {
-    __ipsIndustrialReady = false;
-    __ipsIndustrialLoaded = false;
-    __ipsConfigLoaded = false;
-    sc('sc-backend', 'starting', 'warn');
-    sc('sc-state', 'waiting', 'warn');
-    sc('sc-opcua', 'waiting');
-    sc('sc-mqtt', 'waiting');
-    sc('sc-hz', '-');
-    sc('sc-cursor', '0/0');
-    sc('sc-tags', '0');
-    const ep = $('sc-endpoint');
-    if (ep) ep.querySelector('.val').textContent = `http://127.0.0.1:${CFG.industrial_web_port || 8000}`;
-    __ipsApplyIndustrialWaiting('Industrial backend starting. Built-in files will appear automatically.');
-  } else {
-    __ipsIndustrialReady = true;
-    if (!__ipsIndustrialLoaded) {
-      await __ipsOrigLoadGenerators();
-      await __ipsOrigRefreshFiles();
-      __ipsIndustrialLoaded = true;
-    }
-    if (!__ipsConfigLoaded) {
-      await __ipsOrigRefreshConfigs();
-      __ipsConfigLoaded = true;
-    }
-    await __ipsOrigRefreshStatus();
-  }
-
-  if (!apiOk) {
-    __ipsApiReady = false;
-    __ipsApiLoaded = false;
-    __ipsApplyApiWaiting('API Studio backend starting.');
-  } else {
-    __ipsApiReady = true;
-    if (!__ipsApiLoaded) {
-      await __ipsOrigLoadApiEndpoints();
-      __ipsApiLoaded = true;
-    }
-  }
-};
-
-async function init() {
-  applyLauncherDefaults();
-  renderTagPlan();
-  renderMappingTable([]);
-  __ipsApplyIndustrialWaiting('Industrial backend starting. Built-in files will appear automatically.');
-  __ipsApplyApiWaiting('API Studio backend starting.');
-  await safeStep(loadLaunchStatus, 'Launcher');
-  await safeStep(refreshStatus, 'Status');
-  setInterval(() => refreshStatus().catch(() => {}), 4000);
-  setInterval(() => refreshCurrentValues().catch(() => {}), 1000);
-  setInterval(() => loadLaunchStatus().catch(() => {}), 5000);
-}
-
-init().catch(e => msg(e.message,'error'));
-"""
-        template = template.replace(
-            "init().catch(e => msg(e.message,'error'));",
-            boot_patch,
-            1,
-        )
         return template
 
 class Handler(BaseHTTPRequestHandler):
@@ -368,17 +220,30 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+        query = parse_qs(parsed_url.query)
         if path in ("/", "/index.html"):
             return html_response(self, page())
         if path == "/suite/status":
             return json_response(self, 200, {
                 "portal": {"ok": True, "port": PORT},
                 "industrial": get_service(f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/health"),
-                "api_studio": get_service(f"http://127.0.0.1:{API_STUDIO_PORT}/api/studio/health"),
+                "api_studio": {"ok": False, "disabled": True, "message": "API Studio is not started by the portal simulator suite."},
             })
         if path == "/launcher/config":
             return json_response(self, 200, suite_status_payload(suite_load_ports()))
+        if path == "/logs":
+            try:
+                limit = int((query.get("limit") or ["300"])[0] or 300)
+            except ValueError:
+                limit = 300
+            level = (query.get("level") or [""])[0]
+            source = (query.get("source") or [""])[0]
+            service = (query.get("service") or [""])[0]
+            event = (query.get("event") or [""])[0]
+            text = (query.get("q") or [""])[0]
+            return json_response(self, 200, suite_logs_payload(limit=max(50, min(limit, 1000)), level=level, source=source, service=service, event=event, query=text))
         if path == "/connections":
             return json_response(self, 200, {"connections": read_store(CONNECTIONS_JSON, {})})
         if path == "/api-mappings":
@@ -403,9 +268,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/launcher/start":
                 ports = body.get("ports") or suite_load_ports()
                 include_portal = bool(body.get("include_portal", False))
+                previous_ports = suite_load_ports()
+                suite_stop_services(previous_ports, include_portal=False)
+                if ports != previous_ports:
+                    suite_stop_services(ports, include_portal=False)
                 ok, msg = suite_start_services(ports, include_portal=include_portal, open_browser_flag=False)
                 payload = suite_status_payload(ports)
-                payload.update({"ok": ok, "message": msg})
+                payload.update({"ok": ok, "message": f"Old simulator services closed. {msg}"})
                 return json_response(self, 200, payload)
             if path == "/launcher/open-app":
                 ports = body.get("ports") or suite_load_ports()
@@ -414,6 +283,9 @@ class Handler(BaseHTTPRequestHandler):
                 payload = suite_status_payload(ports)
                 payload.update({"ok": True, "message": "Application window requested." if ok else "Default browser opened because Edge/Chrome app mode was not found."})
                 return json_response(self, 200, payload)
+            if path == "/logs/clear":
+                suite_clear_log()
+                return json_response(self, 200, suite_logs_payload())
             if path == "/launcher/stop":
                 ports = body.get("ports") or suite_load_ports()
                 include_portal = bool(body.get("include_portal", False))
@@ -455,7 +327,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     print(f"Portal: http://127.0.0.1:{PORT}")
     print(f"Industrial simulator: http://127.0.0.1:{INDUSTRIAL_PORT}")
-    print(f"API Studio: http://127.0.0.1:{API_STUDIO_PORT}")
+    print("API Studio: disabled")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

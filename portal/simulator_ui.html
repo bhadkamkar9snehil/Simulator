@@ -1,0 +1,1026 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Control</title>
+<style>
+:root{
+  --bg:#f6f7f9;
+  --paper:#ffffff;
+  --panel:#ffffff;
+  --panel2:#f8fafc;
+  --panel3:#eef2f6;
+  --ink:#101828;
+  --text:#1f2937;
+  --muted:#667085;
+  --soft:#98a2b3;
+  --line:#dde3ea;
+  --line2:#c3ccd7;
+  --dark:#0f172a;
+  --dark2:#152238;
+  --brand:#1d55d4;
+  --brand2:#1746b4;
+  --cyan:#087f9f;
+  --accent:#b54708;
+  --ok:#067647;
+  --warn:#b54708;
+  --bad:#b42318;
+  --info:#175cd3;
+  --okbg:#ecfdf3;
+  --warnbg:#fff6e8;
+  --badbg:#fef3f2;
+  --infobg:#eff8ff;
+  --shadow:0 1px 0 rgba(255,255,255,.95) inset,0 1px 0 rgba(16,24,40,.08),0 4px 14px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.06);
+  --shadow-soft:0 1px 0 rgba(255,255,255,.95) inset,0 1px 0 rgba(16,24,40,.08),0 2px 6px rgba(16,24,40,.06);
+  --shadow-deep:0 1px 0 rgba(255,255,255,.88) inset,0 2px 0 rgba(16,24,40,.10),0 12px 28px rgba(16,24,40,.12);
+  --radius:8px;
+  --radius-sm:6px;
+  --font:"Segoe UI Variable","Segoe UI",Inter,Arial,sans-serif;
+  --mono:"Cascadia Mono","JetBrains Mono",Consolas,ui-monospace,monospace;
+  --transition:140ms cubic-bezier(.25,.1,.25,1);
+}
+[data-theme="dark"]{
+  --bg:#0b1120;
+  --paper:#101828;
+  --panel:#111827;
+  --panel2:#172033;
+  --panel3:#1d2940;
+  --ink:#edf2f7;
+  --text:#d7e0ea;
+  --muted:#9aa8bc;
+  --soft:#728299;
+  --line:#28364e;
+  --line2:#3b4a65;
+  --dark:#050b16;
+  --dark2:#0b1424;
+  --brand:#78a9ff;
+  --brand2:#4d7fe8;
+  --cyan:#5cc7df;
+  --accent:#f59e0b;
+  --ok:#32d583;
+  --warn:#fdb022;
+  --bad:#f97066;
+  --info:#84caff;
+  --okbg:#073d2a;
+  --warnbg:#3a2605;
+  --badbg:#3a1714;
+  --infobg:#102a45;
+  --shadow:0 1px 0 rgba(255,255,255,.04) inset,0 1px 0 rgba(0,0,0,.4),0 12px 28px rgba(0,0,0,.34);
+  --shadow-soft:0 1px 0 rgba(255,255,255,.03) inset,0 1px 0 rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.24);
+  --shadow-deep:0 1px 0 rgba(255,255,255,.04) inset,0 18px 42px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.35;overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button,input,select,textarea{font:inherit}
+button{user-select:none}
+.app{height:100dvh;width:100vw;background:var(--bg);display:grid;grid-template-rows:54px 48px minmax(0,1fr);overflow:hidden}
+.top{background:var(--paper);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 18px;min-width:0;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;z-index:5}
+.brand{height:44px;min-width:48px;display:flex;align-items:center;justify-content:center;gap:0;padding-right:14px;border-right:1px solid var(--line);flex:0 0 auto}
+.brand-mark{width:32px;height:32px;border-radius:7px;position:relative;overflow:hidden;background:linear-gradient(135deg,#102a56 0%,#1746b4 52%,#087f9f 100%);box-shadow:0 0 0 1px rgba(16,24,40,.22) inset,0 2px 5px rgba(16,24,40,.18)}
+.brand-mark:before{content:"";position:absolute;inset:7px;border:2px solid rgba(255,255,255,.86);border-radius:4px}.brand-mark:after{content:"";position:absolute;left:10px;right:10px;top:0;bottom:0;background:rgba(255,255,255,.88);transform:skewX(-18deg)}
+.brand-title,.brand-sub{display:none}
+.top-left{min-width:0;flex:1}.page-title{font-size:19px;font-weight:900;letter-spacing:-.035em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.page-title:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px var(--infobg);margin-right:10px;vertical-align:1px}
+.top-metrics{display:grid;grid-template-columns:repeat(5,auto);border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--paper);box-shadow:var(--shadow-soft);flex:0 1 auto;min-width:0}.metric{padding:7px 13px;border-right:1px solid var(--line);min-width:94px;background:linear-gradient(180deg,var(--paper),var(--panel2))}.metric:last-child{border-right:0}.metric .k{display:block;font-family:var(--mono);font-size:8.5px;color:var(--soft);text-transform:uppercase;letter-spacing:.09em;font-weight:700;margin-bottom:2px}.metric .v{font-size:12.5px;color:var(--ink);font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px}.top-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.nav{height:54px;background:linear-gradient(180deg,var(--paper),#f7f8fa);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;padding:0 18px;overflow-x:auto;overflow-y:hidden;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;z-index:4}.nav::-webkit-scrollbar{height:0}.nav button{height:35px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:7px;padding:0 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:800;white-space:nowrap;letter-spacing:-.005em}.nav button:hover{background:var(--panel3);border-color:var(--line);color:var(--ink)}.nav button.active{background:var(--paper);color:var(--ink);border-color:var(--line2);box-shadow:var(--shadow-soft),inset 0 -2px 0 var(--brand)}
+.nav-ico{width:15px;height:15px;position:relative;flex:0 0 15px;color:inherit;opacity:.82}.nav-ico:before,.nav-ico:after{content:"";position:absolute;border-color:currentColor}.nav-overview:before{inset:2px;border:1.5px solid currentColor;border-radius:3px}.nav-overview:after{left:5px;right:5px;top:5px;bottom:5px;border:1.5px solid currentColor;border-radius:2px}.nav-generate:before{left:6px;top:1px;width:3px;height:13px;background:currentColor;border-radius:2px}.nav-generate:after{left:1px;top:6px;width:13px;height:3px;background:currentColor;border-radius:2px}.nav-datasets:before{left:2px;right:2px;top:2px;height:4px;border:1.5px solid currentColor;border-radius:50%}.nav-datasets:after{left:2px;right:2px;top:5px;bottom:2px;border:1.5px solid currentColor;border-top:0;border-radius:0 0 7px 7px}.nav-jobs:before{inset:2px;border:1.5px solid currentColor;border-radius:3px}.nav-jobs:after{left:5px;right:4px;top:6px;height:1.5px;background:currentColor;box-shadow:0 4px 0 currentColor}.nav-streams:before{left:1px;top:6px;width:4px;height:4px;background:currentColor;border-radius:50%;box-shadow:9px 0 0 currentColor}.nav-streams:after{left:5px;right:5px;top:8px;height:1.5px;background:currentColor}.nav-replay:before{left:2px;top:2px;width:11px;height:11px;border:1.5px solid currentColor;border-radius:50%}.nav-replay:after{left:7px;top:4px;border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent}.nav-lakehouse:before{inset:2px;border:1.5px solid currentColor;border-radius:50%}.nav-lakehouse:after{left:2px;right:2px;top:7px;height:1.5px;background:currentColor;box-shadow:0 4px 0 currentColor}.nav-sql:before{left:3px;right:3px;top:2px;height:4px;border:1.5px solid currentColor;border-radius:50%}.nav-sql:after{left:3px;right:3px;top:5px;bottom:2px;border:1.5px solid currentColor;border-top:0}.nav-video:before{inset:2px;border:1.5px solid currentColor;border-radius:3px}.nav-video:after{right:0;top:5px;border-left:6px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent}.nav-settings:before{inset:3px;border:1.7px solid currentColor;border-radius:50%}.nav-settings:after{left:7px;top:1px;width:1.5px;height:13px;background:currentColor}.nav-logs:before{inset:2px;border:1.5px solid currentColor;border-radius:3px}.nav-logs:after{left:5px;right:4px;top:6px;height:1.5px;background:currentColor;box-shadow:0 4px 0 currentColor}
+
+.command-bar{height:54px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 18px;box-shadow:0 1px 0 rgba(255,255,255,.95) inset;z-index:3;min-width:0}.command-left,.command-right{display:flex;align-items:center;gap:8px;min-width:0}.command-left{overflow:auto;scrollbar-width:none}.command-left::-webkit-scrollbar{height:0}.command-right{font-family:var(--mono);font-size:10.5px;font-weight:800;color:var(--muted);white-space:nowrap}.status-dot{width:8px;height:8px;border-radius:50%;background:var(--soft);box-shadow:0 0 0 4px var(--panel3);flex:0 0 auto}.status-dot.ok{background:var(--ok);box-shadow:0 0 0 4px var(--okbg)}.status-dot.bad{background:var(--bad);box-shadow:0 0 0 4px var(--badbg)}.action-divider{width:1px;height:24px;background:var(--line);margin:0 2px;flex:0 0 auto}.overview-shell{display:grid;gap:14px}.overview-main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:14px}.section-actions{display:flex;align-items:center;gap:8px}.card-h span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.table-wrap.compact{max-height:330px}.action-th{width:1%;white-space:nowrap}.empty-cell{height:86px;text-align:center;color:var(--muted);font-weight:700;background:#fff!important}.empty-cell:before{content:"";display:block;width:30px;height:2px;background:var(--line2);margin:0 auto 10px;border-radius:999px}.btn.ghost{background:#fff;border-color:var(--line);box-shadow:none}.btn.ghost:hover{background:#f8fafc;border-color:var(--line2)}
+.content{overflow:auto;min-width:0;padding:16px 18px 18px;background:linear-gradient(180deg,#ffffff 0%,#f7f8fa 38%,var(--bg) 100%)}.view{display:none}.view.active{display:block}.grid{display:grid;gap:14px}.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0;overflow:hidden}.card-h{min-height:46px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 15px;font-weight:900;letter-spacing:-.02em;color:var(--ink);background:linear-gradient(180deg,var(--paper),var(--panel2))}.card-b{padding:15px}.muted{color:var(--muted)}.hint{color:var(--muted);font-size:12px;line-height:1.5}
+.btn{height:34px;border:1px solid var(--line2);background:linear-gradient(180deg,#fff,#f2f4f7);color:var(--text);border-radius:7px;padding:0 12px;font-size:12.5px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;text-decoration:none;box-shadow:0 1px 0 rgba(255,255,255,.95) inset,0 1px 0 rgba(16,24,40,.10),0 2px 5px rgba(16,24,40,.06);transition:background var(--transition),box-shadow var(--transition),transform var(--transition),border-color var(--transition),color var(--transition)}.btn:hover{background:linear-gradient(180deg,#fff,#eaedf2);border-color:#9caac0;color:var(--ink)}.btn:active{transform:translateY(1px);box-shadow:0 1px 0 rgba(255,255,255,.8) inset}.btn.primary{background:linear-gradient(180deg,#326ce5,#1746b4);border-color:#153f9f;color:white;box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 2px 0 #123782,0 8px 18px rgba(29,85,212,.20)}.btn.primary:hover{background:linear-gradient(180deg,#285ed5,#123f9f);color:white}.btn.danger{background:linear-gradient(180deg,#fff,#fff5f4);border-color:#f1b2ac;color:var(--bad)}.btn.ok{background:linear-gradient(180deg,#fff,#f0fdf4);border-color:#a9e8c5;color:var(--ok)}.btn.small{height:30px;padding:0 10px;font-size:12px}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.form{display:grid;gap:12px}.form.two{grid-template-columns:repeat(2,minmax(0,1fr))}.form.three{grid-template-columns:repeat(3,minmax(0,1fr))}.form.four{grid-template-columns:repeat(4,minmax(0,1fr))}label{display:grid;gap:6px;color:var(--muted);font-size:12px;font-weight:800}input,select,textarea{height:auto;border:1px solid var(--line2);background:linear-gradient(180deg,#fff,#f8fafc);color:var(--ink);border-radius:7px;padding:8px 10px;outline:none;min-width:0;font-weight:650;box-shadow:var(--shadow-soft)}input[type="file"]{padding:7px;background:var(--paper)}input[type="checkbox"]{width:auto;min-width:0;vertical-align:-2px;box-shadow:none}textarea{min-height:88px;resize:vertical}input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,85,212,.15),var(--shadow-soft)}
+.seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:3px;gap:3px}.seg button{height:29px;border:0;background:transparent;border-radius:6px;padding:0 10px;color:var(--muted);cursor:pointer;font-weight:800}.seg button.active{background:var(--paper);color:var(--brand);box-shadow:var(--shadow-soft)}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel);max-height:470px;box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}table{border-collapse:separate;border-spacing:0;width:100%;min-width:760px}th,td{padding:10px 11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}th{font-family:var(--mono);font-size:10px;color:#66758a;text-transform:uppercase;letter-spacing:.08em;background:#f3f6fa;position:sticky;top:0;z-index:1;font-weight:800}tbody tr:last-child td{border-bottom:0}tr:hover td{background:#f7faff}td.empty-cell{color:#66758a;text-align:center;padding:30px 12px;background:#fff;font-weight:600}
+.chip{display:inline-flex;align-items:center;height:23px;border-radius:999px;padding:0 9px;font-size:11px;font-weight:850;background:var(--infobg);color:var(--info);white-space:nowrap;text-transform:capitalize}.chip.ok{background:var(--okbg);color:var(--ok)}.chip.warn{background:var(--warnbg);color:var(--warn)}.chip.bad{background:var(--badbg);color:var(--bad)}.progress{height:8px;border-radius:999px;background:#e5eaf1;overflow:hidden;min-width:112px}.progress span{display:block;height:100%;background:linear-gradient(90deg,#1d55d4,#087f9f);width:0;border-radius:inherit}.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.kv>div{background:linear-gradient(180deg,#fff,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:var(--shadow-soft)}.kv .k{font-family:var(--mono);font-size:10px;color:#66758a;text-transform:uppercase;letter-spacing:.08em;font-weight:800}.kv .v{font-weight:900;margin-top:8px;word-break:break-word;color:var(--ink)}
+.ops-hero{position:relative;border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px;box-shadow:var(--shadow);overflow:hidden}.ops-hero:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#1746b4,#087f9f,#32a6bd)}.ops-grid{display:grid;grid-template-columns:repeat(8,minmax(118px,1fr));gap:10px}.ops-tile{position:relative;background:linear-gradient(180deg,#fff,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:11px 12px;min-height:88px;box-shadow:var(--shadow-soft);overflow:hidden}.ops-tile:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:#d6e2f0}.ops-tile.ops-status{background:linear-gradient(180deg,#111827,#152238);border-color:#1c2a42}.ops-tile.ops-status:after{background:linear-gradient(90deg,#326ce5,#32a6bd)}.ops-tile.ops-status .k{color:#9fb2cc}.ops-tile.ops-status .v{color:#fff}.ops-tile.ops-ok:after{background:#12b76a}.ops-tile.ops-warn:after{background:#f79009}.ops-tile.ops-info:after{background:#2e90fa}.ops-tile .k{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.09em;color:#66758a;font-weight:850;white-space:nowrap}.ops-tile .v{font-size:22px;font-weight:950;margin-top:12px;color:var(--ink);letter-spacing:-.035em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ops-tile .s{font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:700;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drawer{position:fixed;right:18px;top:142px;bottom:18px;width:min(560px,calc(100vw - 36px));background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px rgba(16,24,40,.28);display:none;grid-template-rows:54px minmax(0,1fr);z-index:10}.drawer.show{display:grid}.drawer-h{display:flex;align-items:center;justify-content:space-between;padding:0 15px;border-bottom:1px solid var(--line);font-weight:900;background:linear-gradient(180deg,var(--paper),var(--panel2));color:var(--ink)}.drawer-b{padding:15px;overflow:auto}.pre{font-family:var(--mono);font-size:12px;background:#0b1220;color:#dbe8f7;border:1px solid #22324a;border-radius:8px;padding:13px;overflow:auto;white-space:pre-wrap;max-height:380px;line-height:1.5}.msg{position:fixed;left:18px;bottom:18px;right:18px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-deep);border-radius:8px;padding:12px 14px;display:none;z-index:20;font-weight:800}.msg.show{display:block}.msg.bad{border-color:#f1b2ac;color:var(--bad);background:var(--badbg)}.msg.ok{border-color:#a9e8c5;color:var(--ok);background:var(--okbg)}hr{border:0!important;border-top:1px solid var(--line)!important}
+[data-theme="dark"] .top,[data-theme="dark"] .nav{background:var(--paper)}[data-theme="dark"] .content{background:linear-gradient(180deg,#0d1526 0%,var(--bg) 40%,var(--bg) 100%)}[data-theme="dark"] .metric,[data-theme="dark"] .card-h,[data-theme="dark"] .kv>div,[data-theme="dark"] input,[data-theme="dark"] select,[data-theme="dark"] textarea{background:linear-gradient(180deg,var(--panel),var(--panel2))}[data-theme="dark"] th{background:#172033;color:#98a8bd}[data-theme="dark"] tr:hover td{background:#172033}[data-theme="dark"] td.empty-cell{background:var(--panel);color:#98a8bd}[data-theme="dark"] .btn{background:linear-gradient(180deg,#1c2840,#162033)}[data-theme="dark"] .ops-hero{background:#111827}[data-theme="dark"] .ops-tile{background:linear-gradient(180deg,#121c2e,#0f172a);border-color:var(--line)}
+@media(max-width:1220px){.g2,.g3,.g4,.form.two,.form.three,.form.four,.overview-main{grid-template-columns:1fr}.ops-grid{grid-template-columns:repeat(4,minmax(112px,1fr))}.command-right{display:flex}}
+@media(max-width:780px){.app{grid-template-rows:54px 52px minmax(0,1fr)}.nav{height:54px;padding:0 10px}.nav button{height:54px;padding:0 10px}.command-bar{height:52px;padding:0 10px}.content{padding:12px}.ops-hero{padding:12px;border-radius:10px}.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.kv{grid-template-columns:1fr}.toolbar .btn{min-width:0;max-width:100%;justify-content:center}table{min-width:690px}.drawer{right:10px;left:10px;top:126px;bottom:10px;width:auto}.msg{left:10px;right:10px;bottom:10px}}
+@media(max-width:520px){.ops-grid{grid-template-columns:1fr}.nav button{font-size:12px}.card-b{padding:12px}.ops-tile{min-height:82px}.ops-tile .v{font-size:20px}.command-left .btn{padding:0 9px}.command-left .action-divider{display:none}.command-right .btn{display:none}}
+@media(prefers-reduced-motion:no-preference){.nav button,.btn,.card{transition:border-color var(--transition),color var(--transition),background var(--transition),box-shadow var(--transition),transform var(--transition)}.card:hover{border-color:var(--line2)}}
+
+/* User-control pass: fixed shell, one full-width card per section, internal view scrolling. */
+.content{height:100%;overflow:hidden;padding:0;background:linear-gradient(180deg,#ffffff 0%,#f7f8fa 38%,var(--bg) 100%)}
+.view{height:100%;overflow:auto;padding:16px 18px 18px;scrollbar-gutter:stable}
+.view.active{display:block}
+.grid,.g2,.g3,.g4,.overview-main{grid-template-columns:1fr!important}
+.card{width:100%}
+.method-grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;margin-top:12px}
+.method-tile{border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,var(--paper),var(--panel2));padding:11px;display:grid;gap:8px;box-shadow:var(--shadow-soft)}
+.method-tile .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:850}
+.method-tile .v{font-weight:900;color:var(--ink)}
+.card-stack{display:grid;gap:14px}
+.source-layout{display:grid;gap:14px}
+.job-control-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.job-control-bar .hint{max-width:720px}
+@media(max-width:1220px){.method-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.view{padding:12px}.method-grid{grid-template-columns:1fr}}
+
+
+/* v5: tighter Pidilite-style neutral theme, no accent-card treatment */
+:root{
+  --bg:#f4f5f7;
+  --paper:#ffffff;
+  --panel:#ffffff;
+  --panel2:#f7f8fa;
+  --panel3:#eef0f3;
+  --card:#ffffff;
+  --ink:#121417;
+  --text:#1f252d;
+  --muted:#68707b;
+  --soft:#9aa2ad;
+  --line:#d9dee5;
+  --line2:#c7ced8;
+  --dark:#0b0908;
+  --dark2:#151719;
+  --brand:#1d55d4;
+  --brand2:#1845c4;
+  --cyan:#1d55d4;
+  --accent:#4b5563;
+  --ok:#15783f;
+  --warn:#a87800;
+  --bad:#c93426;
+  --info:#1d55d4;
+  --okbg:#e5f5ed;
+  --warnbg:#fff4c8;
+  --badbg:#ffe7e4;
+  --infobg:#e6edff;
+  --shadow:0 1px 0 rgba(255,255,255,.94) inset,0 1px 0 rgba(18,20,23,.08),0 2px 5px rgba(18,20,23,.06);
+  --shadow-soft:0 1px 0 rgba(255,255,255,.94) inset,0 1px 0 rgba(18,20,23,.08),0 2px 4px rgba(18,20,23,.05);
+  --shadow-deep:0 1px 0 rgba(255,255,255,.88) inset,0 1px 0 rgba(18,20,23,.09),0 5px 14px rgba(18,20,23,.08);
+}
+html,body{background:var(--bg);font-size:14px;color:var(--text)}
+.app{background:var(--bg);grid-template-rows:54px 48px minmax(0,1fr)}
+.top{height:66px;background:var(--paper);border-bottom:1px solid var(--line);gap:14px;padding:0 18px;box-shadow:none}
+.brand{height:44px;min-width:58px;padding-right:16px;border-right:1px solid var(--line);justify-content:flex-start}
+.brand-mark{width:31px;height:31px;border-radius:7px;background:linear-gradient(135deg,#2e333a 0%,#161a1f 100%);box-shadow:0 0 0 1px rgba(18,20,23,.22) inset,0 2px 4px rgba(18,20,23,.14)}
+.brand-mark:before{inset:8px;border:1.8px solid rgba(255,255,255,.88);border-radius:4px}
+.brand-mark:after{left:11px;right:11px;top:0;bottom:0;background:rgba(255,255,255,.86);transform:skewX(-18deg)}
+.page-title{font-size:19px;font-weight:900;letter-spacing:-.04em;color:var(--ink);margin-top:0}
+.page-title:before{display:none}
+#themeBtn{display:none!important}
+.top-metrics{grid-template-columns:repeat(5,auto);border:1px solid var(--line);border-radius:6px;background:#fff;box-shadow:var(--shadow-soft)}
+.metric{background:#fff;border-right:1px solid var(--line);padding:7px 13px;min-width:82px;box-shadow:none}
+.metric .k{font-family:var(--mono);font-size:8.5px;color:var(--soft);text-transform:uppercase;letter-spacing:.09em;font-weight:800;margin-bottom:2px}
+.metric .v{font-size:12.5px;font-weight:800;color:var(--ink);max-width:108px}
+.top-actions{gap:7px}
+.nav{height:54px;background:#0b0908;border-bottom:1px solid #080706;padding:0;gap:0;box-shadow:none;overflow:hidden}
+.nav button{flex:1 1 0;min-width:92px;height:54px;border:0;border-right:1px solid rgba(255,255,255,.08);border-radius:0;background:linear-gradient(180deg,#1e2024,#121416);color:#e9edf2;justify-content:center;padding:4px 12px;font-size:12.5px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),inset 0 -1px 0 rgba(0,0,0,.35)}
+.nav button:last-child{border-right:0}
+.nav button:hover{background:linear-gradient(180deg,#272a2f,#171a1e);color:#fff;border-color:rgba(255,255,255,.10)}
+.nav button.active{background:linear-gradient(180deg,#2b2f36,#161a20);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -3px 0 var(--brand),inset 0 0 0 1px rgba(255,255,255,.05)}
+.nav-ico{display:none!important}
+.command-bar{height:48px;background:#fff;border-bottom:1px solid var(--line);padding:0 18px;box-shadow:none;justify-content:flex-end}
+.command-left{gap:7px}.command-right{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:8px;white-space:nowrap}.command-divider{width:1px;height:22px;background:var(--line);display:inline-block}.danger-lite{color:var(--bad)!important}
+.status-dot{width:7px;height:7px;box-shadow:none}.status-dot.ok{background:var(--ok);box-shadow:none}.status-dot.bad{background:var(--bad);box-shadow:none}
+.content{padding:12px 14px 14px;background:var(--bg)}
+.overview-shell{gap:10px}.overview-main{gap:10px}.grid{gap:10px}.g2,.g3,.g4{gap:10px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow-deep);overflow:hidden}
+.card:hover{border-color:var(--line)!important;transform:none!important}
+.card-h{min-height:40px;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;font-size:14px;font-weight:800;letter-spacing:-.025em;color:var(--ink);box-shadow:none}
+.card-b{padding:11px}
+.ops-hero{background:transparent;border:0;border-radius:0;padding:0;box-shadow:none;overflow:visible}
+.ops-hero:before{display:none!important}
+.ops-grid{grid-template-columns:repeat(8,minmax(112px,1fr));gap:10px}
+.ops-tile,.ops-tile.ops-status{background:#fff!important;border:1px solid var(--line)!important;border-radius:6px;padding:10px 12px;min-height:84px;box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 3px 0 rgba(18,20,23,.04),0 8px 18px rgba(18,20,23,.07);overflow:hidden}
+.ops-tile:after,.ops-tile.ops-status:after,.ops-tile.ops-ok:after,.ops-tile.ops-warn:after,.ops-tile.ops-info:after{display:none!important;background:transparent!important}
+.ops-tile .k,.ops-tile.ops-status .k{font-family:var(--mono);font-size:9px;color:#68707b;text-transform:uppercase;letter-spacing:.09em;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ops-tile .v,.ops-tile.ops-status .v{display:block;margin-top:9px;font-size:23px;letter-spacing:-.04em;font-weight:900;line-height:1;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ops-tile .s{margin-top:4px;font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ops-tile.ops-ok .v,.ops-tile.ops-warn .v,.ops-tile.ops-info .v{color:var(--ink)}
+.btn{height:34px;border:1px solid var(--line2);border-radius:6px;background:linear-gradient(180deg,#fff,#f2f4f7);color:var(--text);padding:0 12px;font-size:12.5px;font-weight:700;box-shadow:0 1px 0 rgba(255,255,255,.95) inset,0 1px 0 rgba(18,20,23,.10),0 2px 4px rgba(18,20,23,.05)}
+.btn:hover{background:linear-gradient(180deg,#f8fafc,#eaedf2);border-color:var(--line2);color:var(--ink)}
+.btn.primary{background:linear-gradient(180deg,#3571e8,#1845c4);border-color:#1640b8;color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 1px 0 rgba(8,22,80,.30),0 3px 8px rgba(24,69,196,.20)}
+.btn.primary:hover{background:linear-gradient(180deg,#2f65d6,#153ead);color:#fff}
+.btn.ok,.btn.danger,.btn.ghost{background:linear-gradient(180deg,#fff,#f2f4f7);border-color:var(--line2);box-shadow:0 1px 0 rgba(255,255,255,.95) inset,0 1px 0 rgba(18,20,23,.10),0 2px 4px rgba(18,20,23,.05)}
+.btn.ok{color:var(--ok)}.btn.danger{color:var(--bad)}.btn.ghost{color:var(--muted)}
+input,select,textarea{border:1px solid var(--line2);background:linear-gradient(180deg,#fff,#f6f7f9);border-radius:6px;box-shadow:var(--shadow-soft);font-weight:650}
+input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,85,212,.13),var(--shadow-soft)}
+.table-wrap{border:1px solid var(--line);border-radius:6px;background:#fff;box-shadow:none}
+th{background:#f1f3f6;color:#68707b;font-family:var(--mono);font-size:10px;letter-spacing:.08em;font-weight:800}
+td{background:#fff}tr:hover td{background:#f7f9fc}.empty-cell,.empty-cell:before{background:#fff!important}
+.chip{border-radius:4px;padding:2px 8px;height:22px;font-size:11.5px;font-weight:800;text-transform:none;border:1px solid #c0d2ff;background:#e6edff;color:var(--brand)}
+.chip.ok{background:#e5f5ed;color:var(--ok);border-color:#b6e2c5}.chip.warn{background:#fff4c8;color:var(--warn);border-color:#f0d874}.chip.bad{background:#ffe7e4;color:var(--bad);border-color:#f1b2aa}
+.progress{height:8px;background:#e4e7ec}.progress span{background:var(--brand)}
+.kv{gap:8px}.kv>div{background:#fff;border:1px solid var(--line);border-radius:6px;padding:10px 12px;box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 2px 5px rgba(18,20,23,.04)}
+.kv .k{font-family:var(--mono);font-size:9px;color:#68707b;text-transform:uppercase;letter-spacing:.09em;font-weight:800}.kv .v{font-weight:900;margin-top:8px;color:var(--ink)}
+.drawer{top:120px;border-radius:8px;box-shadow:0 16px 42px rgba(18,20,23,.20)}.drawer-h{background:#fff;box-shadow:none;min-height:40px}.pre{border-radius:6px;background:#0d1117;color:#dce5ef}
+.msg{border-radius:6px;box-shadow:var(--shadow-deep)}
+[data-theme="dark"]{--bg:#f4f5f7;--paper:#ffffff;--panel:#ffffff;--panel2:#f7f8fa;--panel3:#eef0f3;--ink:#121417;--text:#1f252d;--muted:#68707b;--soft:#9aa2ad;--line:#d9dee5;--line2:#c7ced8;}
+[data-theme="dark"] .top,[data-theme="dark"] .command-bar,[data-theme="dark"] .card,[data-theme="dark"] .ops-tile,[data-theme="dark"] .metric,[data-theme="dark"] .card-h,[data-theme="dark"] .kv>div,[data-theme="dark"] input,[data-theme="dark"] select,[data-theme="dark"] textarea{background:#fff!important;color:var(--text)}
+[data-theme="dark"] .content{background:var(--bg)}[data-theme="dark"] .ops-tile .v,[data-theme="dark"] .ops-tile.ops-status .v{color:var(--ink)}[data-theme="dark"] th{background:#f1f3f6;color:#68707b}[data-theme="dark"] tr:hover td{background:#f7f9fc}[data-theme="dark"] .btn{background:linear-gradient(180deg,#fff,#f2f4f7);color:var(--text)}
+@media(max-width:1220px){.ops-grid{grid-template-columns:repeat(4,minmax(112px,1fr))}.drawer{top:120px}}
+@media(max-width:780px){.app{grid-template-rows:54px 52px minmax(0,1fr)}.nav{height:54px}.nav button{height:54px;min-width:100px}.command-bar{height:52px;padding:0 10px}.content{padding:10px}.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.drawer{top:126px}}
+@media(max-width:520px){.ops-grid{grid-template-columns:1fr}.ops-tile{min-height:78px}.ops-tile .v{font-size:21px}.nav button{font-size:11px;letter-spacing:.08em}}
+
+
+/* v6: remove top title strip and prevent decorative accent cards */
+.top,.brand,.top-left,.page-title,.top-metrics,.top-actions{display:none!important}
+.app{grid-template-rows:54px 48px minmax(0,1fr)!important}
+.ops-hero,.ops-tile,.card,.kv>div{background:#fff!important}
+.ops-hero{border:0!important;box-shadow:none!important}
+.ops-hero:before,.ops-tile:after{display:none!important;content:none!important}
+.ops-tile,.ops-tile.ops-status,.ops-tile.ops-ok,.ops-tile.ops-warn,.ops-tile.ops-info{border:1px solid var(--line)!important;box-shadow:0 1px 0 rgba(255,255,255,.94) inset,0 2px 5px rgba(18,20,23,.05)!important}
+.ops-tile .v,.ops-tile.ops-status .v,.ops-tile.ops-ok .v,.ops-tile.ops-warn .v,.ops-tile.ops-info .v{color:var(--ink)!important}
+.drawer{top:120px!important}
+@media(max-width:780px){.app{grid-template-rows:54px 52px minmax(0,1fr)!important}.drawer{top:126px!important}}
+
+/* Final layout overrides: body stays fixed; the active view owns vertical scrolling. */
+.content{height:100%;overflow:hidden!important;padding:0!important;background:var(--bg)}
+.view{height:100%;overflow:auto;padding:16px 18px 18px;scrollbar-gutter:stable}
+.grid,.g2,.g3,.g4,.overview-main{grid-template-columns:1fr!important}
+.card{width:100%}
+@media(max-width:780px){.content{padding:0!important}.view{padding:12px}}
+
+</style>
+</head>
+<body>
+<script>
+window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
+</script>
+<div class="app">
+  <nav class="nav" id="nav">
+      <button class="active" data-view="overview"><span class="nav-ico nav-overview"></span><span class="nav-label">Overview</span></button>
+      <button data-view="generate"><span class="nav-ico nav-generate"></span><span class="nav-label">Generate</span></button>
+      <button data-view="datasets"><span class="nav-ico nav-datasets"></span><span class="nav-label">Datasets</span></button>
+      <button data-view="jobs"><span class="nav-ico nav-jobs"></span><span class="nav-label">Jobs</span></button>
+      <button data-view="streams"><span class="nav-ico nav-streams"></span><span class="nav-label">Streams</span></button>
+      <button data-view="replay"><span class="nav-ico nav-replay"></span><span class="nav-label">Replay</span></button>
+      <button data-view="lakehouse"><span class="nav-ico nav-lakehouse"></span><span class="nav-label">Lakehouse</span></button>
+      <button data-view="sources"><span class="nav-ico nav-sql"></span><span class="nav-label">Sources</span></button>
+      <button data-view="sql"><span class="nav-ico nav-sql"></span><span class="nav-label">SQL Server</span></button>
+      <button data-view="settings"><span class="nav-ico nav-settings"></span><span class="nav-label">Settings</span></button>
+      <button data-view="logs"><span class="nav-ico nav-logs"></span><span class="nav-label">Logs</span></button>
+    </nav>
+  <section class="command-bar" aria-label="Quick actions">
+    <div class="command-right"><span class="status-dot" id="commandDot"></span><span id="commandState">offline</span><span class="command-divider"></span><button class="btn small" id="pauseAllJobsBtn" title="Pause every active job across all tabs">Pause All Jobs</button><button class="btn small ok" id="resumeAllJobsBtn" title="Resume every paused job">Resume All Jobs</button><button class="btn small danger" id="stopAllJobsBtn" title="Stop every active job">Stop All Jobs</button><span class="command-divider"></span><button class="btn small ghost" id="refreshBtn">Refresh</button></div>
+  </section>
+  <main class="content">
+      <section class="view active" id="view-overview">
+        <div class="overview-shell">
+          <div class="grid g3">
+            <div class="card"><div class="card-h">Backend &amp; Replay</div><div class="card-b"><div class="table-wrap compact"><table id="statusBackendTable"></table></div></div></div>
+            <div class="card"><div class="card-h">Protocols</div><div class="card-b"><div class="table-wrap compact"><table id="statusProtocolsTable"></table></div></div></div>
+            <div class="card"><div class="card-h">HTTP Streams</div><div class="card-b"><div class="table-wrap compact"><table id="statusStreamsTable"></table></div></div></div>
+            <div class="card"><div class="card-h">Workload Runs</div><div class="card-b"><div class="table-wrap compact"><table id="statusRunsTable"></table></div></div></div>
+            <div class="card"><div class="card-h">Source Simulators</div><div class="card-b"><div class="table-wrap compact"><table id="statusSourcesTable"></table></div></div></div>
+            <div class="card"><div class="card-h">Generation</div><div class="card-b"><div class="table-wrap compact"><table id="statusGenerationTable"></table></div></div></div>
+          </div>
+          <div class="overview-main" style="margin-top:14px">
+            <div class="card"><div class="card-h"><span>Jobs</span><div class="section-actions"><button class="btn small ghost" onclick="loadJobs()">Refresh</button></div></div><div class="card-b"><div class="table-wrap compact"><table id="overviewJobs"></table></div></div></div>
+            <div class="card"><div class="card-h"><span>Datasets</span><div class="section-actions"><button class="btn small ghost" onclick="loadDatasets()">Refresh</button></div></div><div class="card-b"><div class="table-wrap compact"><table id="overviewDatasets"></table></div></div></div>
+          </div>
+          <div class="card" style="margin-top:14px"><div class="card-h">API Reference<span class="hint" style="margin-left:10px">Every route this simulator serves. Update the list in simulator_ui.html when routes change.</span></div><div class="card-b"><div class="table-wrap"><table id="apiReferenceTable"></table></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-generate">
+        <div class="toolbar" style="margin-bottom:14px">
+          <button class="btn small subtab active" id="genSubtabFilesBtn" onclick="showGenerateSubtab('files')">Files</button>
+          <button class="btn small subtab" id="genSubtabVideoBtn" onclick="showGenerateSubtab('video')">Video</button>
+        </div>
+        <div id="genSubtab-files">
+          <div class="grid g2">
+            <div class="card"><div class="card-h">Source And Target</div><div class="card-b">
+              <div class="form two">
+                <label>Domain<select id="genDomain"></select></label>
+                <label>Scenario<select id="genScenario"></select></label>
+                <label>Name<input id="genName" value="Generated dataset"/></label>
+                <label>Output Method<select id="genOutput"><option value="csv">Small CSV</option><option value="parquet">Large Parquet dataset</option><option value="lakehouse">Local lakehouse output</option></select></label>
+                <label>Target Basis<select id="genTargetBasis"><option value="rows">Rows</option><option value="physical_bytes">Physical bytes</option><option value="logical_bytes">Logical bytes</option><option value="duration">Duration</option></select></label>
+                <label>Target Value<input id="genTargetValue" type="number" value="1000"/></label>
+                <label>Rows Per Part<input id="genRowsPerPart" type="number" value="1000000"/></label>
+                <label>Rows Per Batch<input id="genRowsPerBatch" type="number" value="10000"/></label>
+                <label>Compression<select id="genCompression"><option>zstd</option><option>snappy</option><option>none</option></select></label>
+                <label>Speed Mode<select id="genSpeed"><option value="max_throughput">Max throughput</option><option value="realistic_rate">Realistic rate</option></select></label>
+              </div>
+              <div style="margin-top:12px" class="toolbar"><button class="btn primary" id="startGenerateJob">Start Generation Job</button><button class="btn" id="startSmallCsv">Generate Small CSV Now</button></div>
+            </div></div>
+            <div class="card"><div class="card-h">Generator Parameters</div><div class="card-b"><div class="form two" id="genParams"></div><div class="hint" id="genDesc" style="margin-top:10px"></div></div></div>
+          </div>
+          <div class="card" style="margin-top:14px"><div class="card-h">Run Review</div><div class="card-b"><div class="pre" id="generateReview">{}</div></div></div>
+        </div>
+        <div id="genSubtab-video" style="display:none">
+          <div class="grid g2">
+            <div class="card"><div class="card-h">Synthetic Video Job</div><div class="card-b"><div class="form two"><label>Name<input id="videoName" value="Synthetic camera run"/></label><label>Camera Count<input id="videoCameraCount" type="number" value="1"/></label><label>FPS<input id="videoFps" type="number" value="5"/></label><label>Resolution<select id="videoResolution"><option value="640x360">640 x 360</option><option value="1280x720">1280 x 720</option><option value="1920x1080">1920 x 1080</option></select></label><label>Duration Seconds<input id="videoDuration" type="number" value="10"/></label><label>Segment Seconds<input id="videoSegment" type="number" value="5"/></label><label>Visual Mode<select id="videoMode"><option>moving_gradient</option><option>noise</option><option>alarm_color_wash</option></select></label><label>Linked Dataset<select id="videoDataset"></select></label></div><button class="btn primary" id="startVideoJob" style="margin-top:12px">Start Video Job</button></div></div>
+            <div class="card"><div class="card-h">Video Plan</div><div class="card-b"><div class="kv"><div><div class="k">Available now</div><div class="v">Generated PPM frame segments plus metadata</div></div><div><div class="k">Planned</div><div class="v">MJPEG, HLS, MP4 with FFmpeg, RTSP later</div></div><div><div class="k">SQL</div><div class="v">Metadata only, not binary video</div></div><div><div class="k">Lakehouse</div><div class="v">Segment files plus manifest</div></div></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-datasets">
+        <div class="grid g2">
+          <div class="card"><div class="card-h">Manual Data Input</div><div class="card-b">
+            <div class="form">
+              <label>Small CSV/XLSX Upload<input id="uploadInput" type="file" accept=".csv,.xlsx" multiple/></label>
+              <div class="toolbar"><button class="btn primary" id="uploadBtn">Upload Small Files</button><button class="btn" id="refreshDatasetsBtn">Refresh Datasets</button></div>
+              <hr style="border:0;border-top:1px solid var(--line);width:100%"/>
+              <label>Register Local File Or Folder<input id="registerPath" placeholder="Path under uploads, generated_data, sample_data, or lakehouse"/></label>
+              <label>Display Name<input id="registerName" placeholder="Optional dataset name"/></label>
+              <button class="btn" id="registerBtn">Register Local Dataset</button>
+              <div class="hint">Browser upload is for small and medium files only. Use local registration for 1-2TB sources.</div>
+            </div>
+          </div></div>
+        </div>
+        <div class="card" style="margin-top:14px"><div class="card-h">Datasets</div><div class="card-b"><div class="table-wrap"><table id="datasetsTable"></table></div></div></div>
+        <div class="card" style="margin-top:14px"><div class="card-h">Preview</div><div class="card-b"><div id="datasetPreviewMeta" class="hint">Select Preview on a dataset.</div><div class="table-wrap" style="margin-top:8px"><table id="datasetPreview"></table></div></div></div>
+      </section>
+
+      <section class="view" id="view-jobs">
+        <div class="card" style="margin-bottom:14px"><div class="card-h">Concurrent Run Launcher</div><div class="card-b">
+          <div class="hint" style="margin-bottom:10px">Pause All / Resume All / Stop All for every active job now live in the command bar above. Build any mix of independent exports below - e.g. one dataset over OPC UA, another over MQTT, a SAP PP feed, a LIMS ODBC feed, and a video job - each with its own settings, launched together as one run.</div>
+          <label>Run Name<input id="workloadName" value="Concurrent simulator run"/></label>
+          <div id="workloadExports" style="margin-top:12px"></div>
+          <div class="toolbar" style="margin-top:10px">
+            <button class="btn small" onclick="addExportRow('replay')">+ Add Replay Export</button>
+            <button class="btn small" onclick="addExportRow('sap_pp')">+ Add SAP PP Export</button>
+            <button class="btn small" onclick="addExportRow('lims_odbc')">+ Add LIMS ODBC Export</button>
+            <button class="btn small" onclick="addExportRow('video')">+ Add Video Export</button>
+          </div>
+          <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="startWorkloadBtn">Start Concurrent Run</button></div>
+          <div class="hint" style="margin-top:8px">Every export above starts its own job under one run. Stop, pause, and resume remain per job below. The suite starts the MQTT broker on the configured port.</div>
+          <div class="pre" id="workloadResult" style="margin-top:12px">No concurrent run started.</div>
+        </div></div>
+        <div class="card" style="margin-bottom:14px"><div class="card-h">Run Groups <button class="btn small" id="refreshRunsBtn">Refresh</button></div><div class="card-b"><div class="table-wrap"><table id="runsTable"></table></div></div></div>
+        <div class="card"><div class="card-h">Jobs And Operations <button class="btn small" id="refreshJobsBtn">Refresh</button></div><div class="card-b"><div class="table-wrap"><table id="jobsTable"></table></div></div></div>
+      </section>
+
+      <section class="view" id="view-streams">
+        <div class="grid g2">
+          <div class="card"><div class="card-h">MQTT</div><div class="card-b"><div class="form two"><label>Host<input id="mqttHost" value="localhost"/></label><label>Port<input id="mqttPort" value="1883"/></label><label>Topic Prefix<input id="mqttTopic" value="industrial-tag-simulator"/></label><label>Payload Shape<select><option>wide row</option><option>narrow tag event</option><option>streampipes flat</option></select></label></div></div></div>
+          <div class="card"><div class="card-h">OPC UA</div><div class="card-b"><div class="form two"><label>Endpoint<input id="opcEndpoint" readonly/></label><label>Namespace<input value="http://local/industrial-tag-simulator"/></label><label>Root Folder<input value="TagSimulator"/></label><label>Node Prefix<input value="TagSimulator"/></label></div></div></div>
+          <div class="card"><div class="card-h">HTTP Streams</div><div class="card-b"><div class="form two"><label>NDJSON<input id="ndjsonUrl" readonly/></label><label>SSE<input id="sseUrl" readonly/></label><label>WebSocket<input id="wsUrl" readonly/></label><label>Interval ms<input id="streamInterval" type="number" value="1000" min="50"/></label><label>Preview Values<input id="streamValueLimit" type="number" value="20" min="0"/></label><label>Event Limit<input id="streamEventLimit" type="number" placeholder="blank = open stream" min="1"/></label></div><div class="toolbar" style="margin-top:12px"><button class="btn primary" id="streamSnapshotBtn">Preview Snapshot</button><button class="btn ghost" id="refreshStreamsBtn">Refresh Metrics</button><button class="btn" id="copyNdjsonBtn">Copy NDJSON</button><button class="btn" id="copySseBtn">Copy SSE</button><button class="btn" id="copyWsBtn">Copy WS</button></div><div class="hint" style="margin-top:8px">HTTP streams publish the active simulator state. Start and stop are controlled by opening or closing the client connection; replay and source data production remains controlled by the jobs below.</div></div></div>
+          <div class="card"><div class="card-h">Live Metrics</div><div class="card-b"><div class="kv" id="streamMetrics"></div><div class="table-wrap" style="margin-top:10px"><table id="streamSnapshotTable"></table></div></div></div>
+          <div class="card"><div class="card-h">Source Outputs</div><div class="card-b"><div class="table-wrap"><table id="streamSourceOutputTable"></table></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-replay">
+        <div class="card-stack">
+          <div class="card"><div class="card-h">Dataset Streaming Control</div><div class="card-b"><div class="form two">
+            <label>Dataset<select id="replayDataset"></select></label>
+            <label>Protocol<select id="replayProtocol"><option value="opcua">OPC UA</option><option value="mqtt">MQTT</option><option value="both">Both</option></select></label>
+            <label>Frequency Hz<input id="replayHz" type="number" value="1" step="0.1"/></label>
+            <label>Loop Mode<select id="replayLoop"><option value="once">once</option><option value="loop_forever">loop_forever</option><option value="hold_last">hold_last</option><option value="ping_pong">ping_pong</option></select></label>
+            <label>Timestamp Mode<select id="replayTimestamp"><option value="wall_clock">wall_clock</option><option value="csv_timestamp_ignore_rate">csv_timestamp_ignore_rate</option></select></label>
+            <label>Max Rows<input id="replayMaxRows" type="number" placeholder="optional"/></label>
+          </div>
+          <div class="method-grid">
+            <div class="method-tile"><div class="k">OPC UA</div><div class="v">Managed replay job</div><button class="btn small" onclick="startReplayProtocol('opcua')">Start OPC UA</button></div>
+            <div class="method-tile"><div class="k">MQTT</div><div class="v">Managed replay job</div><button class="btn small" onclick="startReplayProtocol('mqtt')">Start MQTT</button></div>
+            <div class="method-tile"><div class="k">Both</div><div class="v">One managed dual job</div><button class="btn small" onclick="startReplayProtocol('both')">Start Both</button></div>
+            <div class="method-tile"><div class="k">HTTP</div><div class="v">Snapshot, NDJSON, SSE, WS</div><button class="btn small" onclick="showView('streams')">Configure HTTP</button></div>
+            <div class="method-tile"><div class="k">Per Job</div><div class="v">Pause, resume, stop</div><button class="btn small" onclick="showView('jobs')">Open Jobs</button></div>
+          </div>
+          <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="startReplayJobBtn">Start Selected Protocol</button></div><div class="hint" style="margin-top:8px">Every replay start creates a managed job for the selected dataset and protocol. Start OPC UA and MQTT separately when you want independent pause, resume, and stop control per method.</div></div></div>
+          <div class="card"><div class="card-h">Dataset Method Matrix <button class="btn small" id="refreshDatasetMatrixBtn">Refresh</button></div><div class="card-b"><div class="table-wrap"><table id="datasetMethodTable"></table></div></div></div>
+          <div class="card"><div class="card-h">Current Values</div><div class="card-b"><div class="table-wrap"><table id="currentValues"></table></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-lakehouse">
+        <div class="grid g2">
+          <div class="card"><div class="card-h">Local Lakehouse Output</div><div class="card-b"><div class="form two"><label>Lake Root<input id="lakeRoot" placeholder="Default: industrial_simulator/lakehouse"/></label><label>Partition Columns<input id="lakePartitions" value="event_date,hour"/></label><label>Rows Per Part<input id="lakeRowsPerPart" type="number" value="1000000"/></label><label>Compression<select id="lakeCompression"><option>zstd</option><option>snappy</option></select></label></div><div class="hint" style="margin-top:10px">Basic local partitioned Parquet output is available through generation jobs. Full stream ingestion utility is planned and does not block other paths.</div></div></div>
+          <div class="card"><div class="card-h">Deferred Ingestor</div><div class="card-b"><div class="kv"><div><div class="k">Inputs</div><div class="v">MQTT, NDJSON, SSE, WebSocket, OPC UA later</div></div><div><div class="k">Outputs</div><div class="v">Local Parquet commits, SQL projection</div></div><div><div class="k">Status</div><div class="v"><span class="chip warn">planned</span></div></div><div><div class="k">Cloud</div><div class="v">ADLS/S3 deferred</div></div></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-sources">
+        <div class="source-layout">
+          <div class="card"><div class="card-h">Source Catalog</div><div class="card-b"><div class="table-wrap"><table id="sourceCatalogTable"></table></div></div></div>
+          <div class="card"><div class="card-h">SAP PP OData</div><div class="card-b">
+            <div class="form two">
+              <label>Entity<select id="sapEntity"></select></label>
+              <label>Filter<input id="sapFilter" placeholder="Product eq 'FG-UREA'"/></label>
+              <label>Top<input id="sapTop" type="number" value="10"/></label>
+              <label>Skip<input id="sapSkip" type="number" value="0"/></label>
+              <label>Job Interval Seconds<input id="sapJobInterval" type="number" value="10" step="0.5"/></label>
+              <label>Job Cycles<input id="sapJobCycles" type="number" value="5"/></label>
+            </div>
+            <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="querySapBtn">Query SAP PP</button><button class="btn ok" id="startSapJobBtn">Start Query Job</button><button class="btn" id="sapErrorBtn">Test Error Hook</button><button class="btn" id="sapLatencyBtn">Test Latency Hook</button></div>
+            <div class="hint" id="sapUrl" style="margin-top:10px">Select an entity to view the OData URL.</div>
+            <div class="table-wrap" style="margin-top:10px"><table id="sapRowsTable"></table></div>
+          </div></div>
+          <div class="card"><div class="card-h">LIMS ODBC Polling</div><div class="card-b">
+            <div class="form two">
+              <label>View Or Table<select id="limsEntity"></select></label>
+              <label>Watermark<input id="limsWatermark" placeholder="ModifiedUTC value"/></label>
+              <label>Filter<input id="limsFilter" placeholder="PlantCode eq 'UREA_AMM'"/></label>
+              <label>Top<input id="limsTop" type="number" value="20"/></label>
+              <label>Job Mode<select id="limsJobMode"><option value="cycle">cycle</option><option value="query">query</option></select></label>
+              <label>Job Interval Seconds<input id="limsJobInterval" type="number" value="15" step="0.5"/></label>
+              <label>Job Cycles<input id="limsJobCycles" type="number" value="5"/></label>
+            </div>
+            <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="queryLimsBtn">Query LIMS</button><button class="btn ok" id="startLimsJobBtn">Start Cycle Job</button><button class="btn" id="runLimsCycleBtn">Run One Cycle</button><button class="btn" id="useLatestWatermarkBtn">Use Latest Watermark</button></div>
+            <div class="hint" id="limsCycleStatus" style="margin-top:10px">LIMS samples are cycle based, not per-second tag streams.</div>
+            <div class="table-wrap" style="margin-top:10px"><table id="limsRowsTable"></table></div>
+          </div></div>
+          <div class="card"><div class="card-h">Source Jobs</div><div class="card-b"><div class="table-wrap"><table id="sourceJobsTable"></table></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-sql">
+        <div class="grid g2">
+          <div class="card"><div class="card-h">SQL Server Connection</div><div class="card-b"><div class="form two"><label>Server<input id="dbServer" value="localhost"/></label><label>Port<input id="dbPort" value="1433"/></label><label>Auth<select id="dbAuth"><option value="sql">SQL Login</option><option value="windows">Windows Auth</option></select></label><label>Database<select id="dbDatabase"><option>master</option></select></label><label>User<input id="dbUser" value="sa"/></label><label>Password<input id="dbPass" type="password"/></label><label>Table<select id="dbTable"><option>dbo.tag_snapshots</option></select></label><label><span>Options</span><span><input type="checkbox" id="dbTrust" checked/> Trust certificate</span></label></div><div class="toolbar" style="margin-top:12px"><button class="btn" id="testDbBtn">Test</button><button class="btn" id="loadDbsBtn">Load DBs</button><button class="btn" id="loadTablesBtn">Load Tables</button><button class="btn ok" id="writeCurrentBtn">Write Current Values</button></div></div></div>
+          <div class="card"><div class="card-h">Projection Status</div><div class="card-b"><div class="pre" id="sqlResult">No SQL action yet.</div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="grid g2">
+          <div class="card"><div class="card-h">Service Control</div><div class="card-b"><div class="form two"><label>Industrial Port<input id="lpIndustrial" value="8000"/></label><label>Portal Port<input id="lpPortal" value="8001"/></label><label>OPC UA Port<input id="lpOpcua" value="4840"/></label><label>MQTT Port<input id="lpMqtt" value="1883"/></label></div><div class="toolbar" style="margin-top:12px"><button class="btn" id="savePorts">Save Ports</button><button class="btn ok" id="launchStart">Restart Services</button><button class="btn danger" id="launchStop">Stop Services</button></div><div class="hint" style="margin-top:10px">Restart first closes old Industrial, OPC UA, and MQTT processes bound to the configured ports, then starts a fresh suite while keeping this portal open.</div></div></div>
+          <div class="card"><div class="card-h">Raw Status</div><div class="card-b"><div class="pre" id="rawStatus">{}</div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-logs">
+        <div class="card"><div class="card-h">Structured Logs <button class="btn small" id="refreshLogsBtn">Refresh</button></div><div class="card-b"><div class="table-wrap"><table id="logsTable"></table></div><div class="pre" id="logDetail" style="margin-top:12px">Select a log row.</div></div></div>
+      </section>
+    </main>
+</div>
+<div class="drawer" id="drawer"><div class="drawer-h"><span id="drawerTitle">Details</span><button class="btn small" id="drawerClose">Close</button></div><div class="drawer-b"><div class="pre" id="drawerBody">{}</div></div></div>
+<div class="msg" id="msg"></div>
+<script>
+const CFG = window.SIMULATOR_LAUNCHER_CONFIG || {};
+const INDUSTRIAL = `http://127.0.0.1:${CFG.industrial_web_port || 8000}`;
+const PORTAL = `http://127.0.0.1:${CFG.portal_port || 8001}`;
+const $ = id => document.getElementById(id);
+const state = {datasets:[], jobs:[], runs:[], generators:[], spec:null, status:{}, sources:[], sourceSpecs:{}, sourceJobs:[], latestLimsRows:[], streamStatus:{}};
+function setText(id,value){const el=$(id); if(el) el.textContent=value;}
+
+function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtBytes(n){if(n==null)return '-'; let x=Number(n),u=['B','KB','MB','GB','TB'],i=0; while(x>=1024&&i<u.length-1){x/=1024;i++} return `${x.toFixed(i?1:0)} ${u[i]}`;}
+function fmtDate(v){if(!v)return '-'; const s=String(v); if(!/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}/.test(s))return s; const d=new Date(s); if(Number.isNaN(d.getTime()))return s; return d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function isDateLikeKey(key){return /(^ts$|timestamp|time|date|_at$|modified|watermark)/i.test(String(key||''));}
+function cellValue(row,col){const v=row?.[col.key]; if(isDateLikeKey(col.key))return fmtDate(v); if(typeof v==='string'&&/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v))return fmtDate(v); return v;}
+function chip(s){let c=s==='ready'||s==='completed'||s==='running'?'ok':(s==='failed'||s==='error'?'bad':(s==='planned'||s==='partial'||s==='cancelled'?'warn':''));return `<span class="chip ${c}">${esc(s||'-')}</span>`}
+function msg(text,type=''){const el=$('msg'); el.textContent=text; el.className=`msg show ${type}`; setTimeout(()=>el.className='msg',4500)}
+async function api(path,opts={}){const r=await fetch(path.startsWith('http')?path:INDUSTRIAL+path,opts);let d={};try{d=await r.json()}catch{} if(!r.ok)throw new Error(d.detail?.error||d.error||r.statusText);return d}
+async function portal(path,opts={}){const r=await fetch(PORTAL+path,opts);let d={};try{d=await r.json()}catch{} if(!r.ok)throw new Error(d.error||r.statusText);return d}
+function table(id,cols,rows,actions){const el=$(id); if(!el)return; rows=rows||[];const empty=`<tr><td class="empty-cell" colspan="${cols.length+(actions?1:0)}">No records to display</td></tr>`;el.innerHTML=`<thead><tr>${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}${actions?'<th class="action-th">Actions</th>':''}</tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr>${cols.map(c=>`<td>${c.render?c.render(r,i):esc(cellValue(r,c))}</td>`).join('')}${actions?`<td>${actions(r,i)}</td>`:''}</tr>`).join(''):empty}</tbody>`}
+function kv(id,items){const el=$(id);if(!el)return;el.innerHTML=items.map(x=>`<div><div class="k">${esc(x[0])}</div><div class="v">${x[1]}</div></div>`).join('')}
+function details(title,obj){$('drawerTitle').textContent=title;$('drawerBody').textContent=JSON.stringify(obj,null,2);$('drawer').classList.add('show')}
+window.inspectDataset=id=>details('Dataset',state.datasets.find(d=>d.dataset_id===id)||{dataset_id:id});
+window.inspectJob=id=>details('Job',state.jobs.find(j=>j.job_id===id)||{job_id:id});
+window.inspectRun=id=>details('Run',state.runs.find(r=>r.run_id===id)||{run_id:id});
+window.inspectLog=i=>details('Log',state.logs?.[i]||{});
+$('drawerClose').onclick=()=>$('drawer').classList.remove('show');
+
+document.querySelectorAll('#nav button').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('#nav button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));$(`view-${btn.dataset.view}`).classList.add('active');if($('pageTitle')) $('pageTitle').textContent=btn.querySelector('.nav-label')?.textContent?.trim() || btn.dataset.view; if(btn.dataset.view==='logs') loadLogs(); if(btn.dataset.view==='sources') loadSources(); if(btn.dataset.view==='streams') loadStreamStatus(); if(btn.dataset.view==='replay') renderDatasetMethodMatrix();});
+if($('themeBtn')) $('themeBtn').onclick=()=>document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+
+async function loadAll(){await Promise.allSettled([loadStatus(),loadGenerators(),loadDatasets(),loadJobs(),loadSources(false),loadStreamStatus(false),loadLogs(false)]); renderOverview(); renderGenerateReview(); }
+function statusTable(id,rows){table(id,[{label:'',key:'k'},{label:'',key:'v'}],rows.map(([k,v])=>({k,v})));}
+async function loadStatus(){try{const health=await api('/api/health'); const status=await api('/api/status'); state.status={health,status}; setText('mBackend',health.status); setText('mParquet',health.parquet_available?'available':'missing'); setText('mReplay',status.simulator?.state||'idle'); if($('commandState')) $('commandState').textContent=`${health.status} · replay ${status.simulator?.state||'idle'}`; if($('commandDot')) $('commandDot').className='status-dot ok'; $('rawStatus').textContent=JSON.stringify({health,status},null,2);
+  statusTable('statusBackendTable',[['Backend',health.status],['Parquet',health.parquet_available?'<span class="chip ok">available</span>':'<span class="chip warn">missing</span>'],['Replay state',status.simulator?.state||'idle'],['Files registered',status.simulator?.file_count||0],['Active jobs',`${state.jobs.filter(j=>['queued','running','paused'].includes(j.state)).length} / ${state.jobs.length} total`],['Datasets',`${state.datasets.length} (${fmtBytes(state.datasets.reduce((a,d)=>a+(d.physical_size_bytes||0),0))})`]]);
+  statusTable('statusProtocolsTable',[['OPC UA',status.protocol?.opcua?.running?'<span class="chip ok">running</span>':'idle'],['OPC UA endpoint',`opc.tcp://localhost:${CFG.opcua_port||4840}/simulator`],['MQTT',status.protocol?.mqtt?.running?'<span class="chip ok">running</span>':'idle'],['MQTT broker',`localhost:${CFG.mqtt_port||1883}`],['Tags',status.simulator?.tag_count||0]]);
+  $('opcEndpoint').value=`opc.tcp://localhost:${CFG.opcua_port||4840}/simulator`;
+}catch(e){setText('mBackend','offline');setText('mParquet','unknown');setText('mReplay','idle');if($('commandState')) $('commandState').textContent='offline'; if($('commandDot')) $('commandDot').className='status-dot bad';
+  statusTable('statusBackendTable',[['Backend','<span class="chip bad">offline</span>'],['Parquet','unknown'],['Replay state','idle'],['Files registered',0],['Active jobs','0 / 0 total'],['Datasets','0 (0 B)']]);
+  statusTable('statusProtocolsTable',[['OPC UA','waiting'],['OPC UA endpoint',`opc.tcp://localhost:${CFG.opcua_port||4840}/simulator`],['MQTT','waiting'],['MQTT broker',`localhost:${CFG.mqtt_port||1883}`],['Tags',0]]);
+  $('rawStatus').textContent=JSON.stringify({backend:'offline',error:e.message},null,2);
+}}
+function streamUrls(){
+  const interval=Number($('streamInterval')?.value||1000);
+  const values=Number($('streamValueLimit')?.value||20);
+  const eventLimit=$('streamEventLimit')?.value;
+  const limitParam=eventLimit?`&limit=${encodeURIComponent(eventLimit)}`:'';
+  const ndjson=`${INDUSTRIAL}/api/streams/ndjson?interval_ms=${interval}&value_limit=${values}${limitParam}`;
+  const sse=`${INDUSTRIAL}/api/streams/sse?interval_ms=${interval}&value_limit=${values}${limitParam}`;
+  const ws=`ws://127.0.0.1:${CFG.industrial_web_port||8000}/api/streams/ws?interval_ms=${interval}&value_limit=${values}${limitParam}`;
+  if($('ndjsonUrl'))$('ndjsonUrl').value=ndjson;
+  if($('sseUrl'))$('sseUrl').value=sse;
+  const streamInfo=state.streamStatus?.streams||state.status?.status?.streams||null;
+  if($('wsUrl'))$('wsUrl').value=streamInfo&&!streamInfo.transports?.includes('websocket')?`Unavailable: ${streamInfo.websocket_detail||'runtime lacks websocket transport'}`:ws;
+  return {ndjson,sse,ws};
+}
+async function copyText(value,label){try{await navigator.clipboard.writeText(value); msg(`${label} copied`,'ok')}catch{details(label,value)}}
+function renderStreamMetrics(){
+  streamUrls();
+  const s=state.streamStatus?.streams||state.status?.status?.streams||{};
+  const transports=s.transports||[];
+  kv('streamMetrics',[
+    ['NDJSON',transports.includes('ndjson')?'<span class="chip ok">available</span>':'-'],
+    ['SSE',transports.includes('sse')?'<span class="chip ok">available</span>':'-'],
+    ['WebSocket',transports.includes('websocket')?'<span class="chip ok">available</span>':'<span class="chip warn">runtime missing</span>'],
+    ['Active clients',s.active_clients??0],
+    ['Messages',s.messages_sent??0],
+    ['Bytes',fmtBytes(s.bytes_sent||0)],
+    ['Started',fmtDate(s.started_at)],
+    ['Last event',fmtDate(s.last_event_at)],
+    ['Backpressure',s.backpressure?.mode||'per-client interval pull']
+  ]);
+}
+function renderStreamSourceOutputs(snapshot){
+  const rows=(snapshot?.source_outputs?.items||[]).map(item=>{
+    const sample=(item.sample||[])[0]||{};
+    return {connector:item.connector_id||'',entity:item.entity||'',state:item.state||'',cycles:item.cycles??0,last_rows:item.last_rows??0,watermark:fmtDate(item.last_watermark||''),sample:Object.keys(sample).length?JSON.stringify(sample):''};
+  });
+  if($('streamSourceOutputTable'))table('streamSourceOutputTable',[
+    {label:'Connector',key:'connector'},
+    {label:'Entity',key:'entity'},
+    {label:'State',render:r=>chip(r.state||'-')},
+    {label:'Cycles',key:'cycles'},
+    {label:'Rows',key:'last_rows'},
+    {label:'Watermark',key:'watermark'},
+    {label:'Latest Sample',render:r=>`<span title="${esc(r.sample)}">${esc(r.sample.length>120?r.sample.slice(0,117)+'...':r.sample)}</span>`}
+  ],rows);
+}
+async function loadStreamStatus(show=true){
+  try{state.streamStatus=await api('/api/streams/status'); renderStreamMetrics()}
+  catch(e){if(show)msg(e.message,'bad')}
+}
+async function previewStreamSnapshot(){
+  try{
+    const limit=Number($('streamValueLimit')?.value||20);
+    const d=await api(`/api/streams/snapshot?value_limit=${limit}`);
+    const rows=(d.current_values?.items||[]).map(r=>({tag_name:r.tag_name,node_id:r.node_id,value:r.value,data_type:r.data_type,updated:r.last_updated}));
+    table('streamSnapshotTable',[{label:'Tag',key:'tag_name'},{label:'Node',key:'node_id'},{label:'Value',key:'value'},{label:'Type',key:'data_type'},{label:'Updated',key:'updated'}],rows);
+    renderStreamSourceOutputs(d);
+    msg(`Snapshot: ${d.current_values?.count||0} values, ${d.source_outputs?.active||0} active source jobs, ${d.jobs?.active||0} active jobs`,'ok');
+    await loadStreamStatus(false);
+  }catch(e){msg(e.message,'bad')}
+}
+async function loadGenerators(){const d=await api('/api/generators'); state.generators=d.generators||[]; $('genDomain').innerHTML=state.generators.map(g=>`<option value="${esc(g.domain_id)}">${esc(g.display_name)}</option>`).join(''); if(!state.spec && state.generators[0]) await loadSpec(state.generators[0].domain_id);}
+async function loadSpec(id){const spec=await api(`/api/generators/${encodeURIComponent(id)}/spec`); state.spec=spec; $('genScenario').innerHTML=(spec.scenarios||[]).map(s=>`<option value="${esc(s.id)}">${esc(s.label)}</option>`).join(''); $('genDesc').textContent=spec.description||''; $('genParams').innerHTML=(spec.parameters||[]).map(p=>`<label>${esc(p.label||p.name)}${paramInput(p)}</label>`).join(''); renderGenerateReview();}
+function paramInput(p){const val=p.default??''; if(p.type==='select')return `<select data-param="${esc(p.name)}">${(p.options||[]).map(o=>`<option ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select>`; return `<input data-param="${esc(p.name)}" type="${p.type==='number'?'number':'text'}" value="${esc(val)}" ${p.step?`step="${p.step}"`:''}/>`}
+$('genDomain').onchange=e=>loadSpec(e.target.value);
+document.addEventListener('input',e=>{if(e.target.closest('#view-generate'))renderGenerateReview()});
+function genParams(){const out={}; document.querySelectorAll('[data-param]').forEach(el=>out[el.dataset.param]=el.type==='number'?Number(el.value):el.value); return out}
+function genJobPayload(){return {scenario:$('genScenario').value,name:$('genName').value,output_format:$('genOutput').value,parameters:genParams(),target_basis:$('genTargetBasis').value,target_value:Number($('genTargetValue').value||0),speed_mode:$('genSpeed').value,rows_per_batch:Number($('genRowsPerBatch').value||10000),rows_per_part:Number($('genRowsPerPart').value||1000000),compression:$('genCompression').value,lakehouse_root:$('lakeRoot')?.value||null,output_sinks:[$('genOutput').value]}}
+function renderGenerateReview(){$('generateReview').textContent=JSON.stringify(genJobPayload(),null,2)}
+$('startGenerateJob').onclick=async()=>{try{const d=await api(`/api/generators/${$('genDomain').value}/generate-job`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(genJobPayload())}); msg(`Job ${d.job_id} created`,'ok'); await loadJobs(); showView('jobs')}catch(e){msg(e.message,'bad')}};
+$('startSmallCsv').onclick=async()=>{try{const payload={scenario:$('genScenario').value,output_filename:`${$('genDomain').value}_${Date.now()}.csv`,parameters:genParams()}; const d=await api(`/api/generators/${$('genDomain').value}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); msg(`Generated ${d.filename}`,'ok'); await loadDatasets()}catch(e){msg(e.message,'bad')}};
+function showView(v){document.querySelector(`#nav button[data-view="${v}"]`).click()}
+function showGenerateSubtab(name){
+  $('genSubtab-files').style.display=name==='files'?'':'none';
+  $('genSubtab-video').style.display=name==='video'?'':'none';
+  $('genSubtabFilesBtn').classList.toggle('active',name==='files');
+  $('genSubtabVideoBtn').classList.toggle('active',name==='video');
+}
+
+async function loadDatasets(){const d=await api('/api/datasets'); state.datasets=d.datasets||[]; setText('mDatasets',state.datasets.length); renderDatasets();}
+function replayableDatasets(){const ready=state.datasets.filter(d=>d.ready_for_replay&&d.storage_format==='csv'); return ready.length?ready:state.datasets;}
+function renderDatasets(){table('datasetsTable',[{label:'Name',key:'name'},{label:'Format',key:'storage_format'},{label:'State',render:r=>chip(r.state)},{label:'Rows',render:r=>r.row_count!=null?Number(r.row_count).toLocaleString():'-'},{label:'Size',render:r=>fmtBytes(r.physical_size_bytes)},{label:'Parts',key:'part_count'},{label:'Replay',render:r=>r.ready_for_replay?chip('ready'):chip('not ready')},{label:'Source',key:'source'}],state.datasets,(r)=>`<button class="btn small" onclick='previewDataset("${r.dataset_id}")'>Preview</button> <button class="btn small" onclick='inspectDataset("${r.dataset_id}")'>Inspect</button>`); const opts=replayableDatasets().map(d=>`<option value="${esc(d.dataset_id)}">${esc(d.name)} (${esc(d.storage_format)})</option>`).join(''); state.datasetOptionsHtml=opts; $('replayDataset').innerHTML=opts; $('videoDataset').innerHTML='<option value="">None</option>'+opts; renderDatasetMethodMatrix();}
+function renderDatasetMethodMatrix(){
+  const rows=replayableDatasets().map(d=>({dataset_id:d.dataset_id,name:d.name,format:d.storage_format,state:d.state,rows:d.row_count,ready:d.ready_for_replay}));
+  table('datasetMethodTable',[
+    {label:'Dataset',key:'name'},
+    {label:'Format',key:'format'},
+    {label:'State',render:r=>chip(r.state)},
+    {label:'Rows',render:r=>r.rows!=null?Number(r.rows).toLocaleString():'-'},
+    {label:'Replay',render:r=>r.ready?chip('ready'):chip('not ready')},
+    {label:'HTTP Pull',render:()=>'<span class="chip ok">snapshot / ndjson / sse / ws</span>'}
+  ],rows,r=>`<button class="btn small" onclick='startReplayForDataset("${r.dataset_id}","opcua")'>OPC UA</button> <button class="btn small" onclick='startReplayForDataset("${r.dataset_id}","mqtt")'>MQTT</button> <button class="btn small" onclick='startReplayForDataset("${r.dataset_id}","both")'>Both</button> <button class="btn small" onclick='selectDatasetAndStreams("${r.dataset_id}")'>HTTP</button>`);
+}
+window.previewDataset=async(id)=>{try{const d=await api(`/api/datasets/${encodeURIComponent(id)}/preview?limit=10`); $('datasetPreviewMeta').textContent=`${d.filename||id} - ${(d.rows||[]).length} preview rows`; const cols=(d.columns||Object.keys((d.rows||[])[0]||{})).map(c=>({label:c,key:c})); table('datasetPreview',cols,d.rows||[])}catch(e){msg(e.message,'bad')}};
+$('refreshDatasetsBtn').onclick=loadDatasets;
+$('uploadBtn').onclick=async()=>{try{for(const f of $('uploadInput').files){const fd=new FormData();fd.append('file',f);await api('/api/csv/upload',{method:'POST',body:fd})} msg('Upload complete','ok'); await loadDatasets()}catch(e){msg(e.message,'bad')}};
+$('registerBtn').onclick=async()=>{try{const d=await api('/api/datasets/register-local',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('registerPath').value,name:$('registerName').value||null})}); msg(`Registered ${d.dataset_id}`,'ok'); await loadDatasets()}catch(e){msg(e.message,'bad')}};
+
+async function loadJobs(){const [d,r]=await Promise.all([api('/api/jobs'),api('/api/workloads/runs')]); state.jobs=d.jobs||[]; state.runs=r.runs||[]; const active=state.jobs.filter(j=>['queued','running','paused'].includes(j.state)).length; setText('mJobs',`${active} active`); renderRuns(); renderJobs();}
+function runActions(r){
+  const inspect=`<button class="btn small" onclick='inspectRun("${r.run_id}")'>Inspect</button>`;
+  if(!r.active_jobs)return inspect;
+  if(r.state==='paused')return `${inspect} <button class="btn small" onclick='resumeRun("${r.run_id}")'>Resume All</button> <button class="btn danger small" onclick='stopRun("${r.run_id}")'>Stop All</button>`;
+  return `${inspect} <button class="btn small" onclick='pauseRun("${r.run_id}")'>Pause All</button> <button class="btn danger small" onclick='stopRun("${r.run_id}")'>Stop All</button>`;
+}
+function renderRuns(){
+  if(!$('runsTable'))return;
+  table('runsTable',[
+    {label:'Run',key:'name'},
+    {label:'State',render:r=>chip(r.state)},
+    {label:'Jobs',render:r=>`${r.active_jobs||0}/${r.job_count||0} active`},
+    {label:'Progress',render:r=>`<div class="progress"><span style="width:${Math.max(0,Math.min(100,r.progress_percent||0))}%"></span></div>`},
+    {label:'Rows',render:r=>Number(r.rows_done||0).toLocaleString()},
+    {label:'Protocols',render:r=>esc((r.protocols||[]).join(', ')||'-')},
+    {label:'Connectors',render:r=>esc((r.connectors||[]).join(', ')||'-')},
+    {label:'Updated',key:'updated_at'}
+  ],state.runs,runActions);
+}
+function jobActions(r){
+  const inspect=`<button class="btn small" onclick='inspectJob("${r.job_id}")'>Inspect</button>`;
+  if(['completed','failed','cancelled'].includes(r.state))return inspect;
+  if(r.type==='source_simulation'){
+    if(r.state==='paused')return `${inspect} <button class="btn small" onclick='resumeSourceJob("${r.job_id}")'>Resume</button> <button class="btn danger small" onclick='stopSourceJob("${r.job_id}")'>Stop</button>`;
+    return `${inspect} <button class="btn small" onclick='pauseSourceJob("${r.job_id}")'>Pause</button> <button class="btn danger small" onclick='stopSourceJob("${r.job_id}")'>Stop</button>`;
+  }
+  if(r.type==='replay_dataset'){
+    if(r.state==='paused')return `${inspect} <button class="btn small" onclick='resumeReplayJob("${r.job_id}")'>Resume</button> <button class="btn danger small" onclick='stopReplayJob("${r.job_id}")'>Stop</button>`;
+    return `${inspect} <button class="btn small" onclick='pauseReplayJob("${r.job_id}")'>Pause</button> <button class="btn danger small" onclick='stopReplayJob("${r.job_id}")'>Stop</button>`;
+  }
+  return `${inspect} <button class="btn danger small" onclick='cancelJob("${r.job_id}")'>Cancel</button>`;
+}
+function jobDataLabel(r){const cp=r.checkpoint||{}; if(cp.connector_id)return `${cp.connector_id}:${cp.entity||'-'}`; if(cp.dataset_id)return cp.dataset_id; if(r.dataset_id)return r.dataset_id; if(cp.csv_file)return `${cp.csv_source||'csv'}:${cp.csv_file}`; return '-'}
+function renderJobs(){const cols=[{label:'Job',key:'name'},{label:'Data',render:r=>esc(jobDataLabel(r))},{label:'Type',key:'type'},{label:'State',render:r=>chip(r.state)},{label:'Progress',render:r=>`<div class="progress"><span style="width:${Math.max(0,Math.min(100,r.progress_percent||0))}%"></span></div>`},{label:'Rows/sec',render:r=>(r.rows_per_sec||0).toFixed(0)},{label:'MB/sec',render:r=>(r.mb_per_sec||0).toFixed(1)},{label:'Bottleneck',key:'active_bottleneck'},{label:'Updated',key:'updated_at'}]; table('jobsTable',cols,state.jobs,jobActions); table('overviewJobs',cols.slice(0,5),state.jobs.slice(0,6),r=>`<button class="btn small" onclick='inspectJob("${r.job_id}")'>Inspect</button>`);}
+window.cancelJob=async(id)=>{await api(`/api/jobs/${id}/cancel`,{method:'POST'}); await loadJobs();};
+window.pauseRun=async id=>{await api(`/api/workloads/runs/${id}/pause`,{method:'POST'}); await loadJobs();};
+window.resumeRun=async id=>{await api(`/api/workloads/runs/${id}/resume`,{method:'POST'}); await loadJobs();};
+window.stopRun=async id=>{await api(`/api/workloads/runs/${id}/stop`,{method:'POST'}); await loadJobs();};
+function activeJobs(){return state.jobs.filter(j=>!['completed','failed','cancelled'].includes(j.state))}
+async function controlJob(job,action){
+  if(job.type==='source_simulation')return api(`/api/source-simulators/jobs/${job.job_id}/${action==='stop'?'stop':action}`,{method:'POST'});
+  if(job.type==='replay_dataset')return api(`/api/replay/jobs/${job.job_id}/${action==='stop'?'stop':action}`,{method:'POST'});
+  const path=action==='stop'?`/api/jobs/${job.job_id}/cancel`:`/api/jobs/${job.job_id}/${action}`;
+  return api(path,{method:'POST'});
+}
+async function controlAllJobs(action){
+  const jobs=activeJobs();
+  if(!jobs.length){msg('No active jobs to control.','ok');return}
+  await Promise.allSettled(jobs.map(job=>controlJob(job,action)));
+  msg(`${action==='stop'?'Stop':action==='pause'?'Pause':'Resume'} requested for ${jobs.length} active jobs.`,'ok');
+  await Promise.allSettled([loadJobs(),loadSourceJobs(false),loadStatus()]);
+}
+if($('pauseAllJobsBtn'))$('pauseAllJobsBtn').onclick=()=>controlAllJobs('pause');
+if($('resumeAllJobsBtn'))$('resumeAllJobsBtn').onclick=()=>controlAllJobs('resume');
+if($('stopAllJobsBtn'))$('stopAllJobsBtn').onclick=()=>controlAllJobs('stop');
+$('refreshJobsBtn').onclick=loadJobs;
+if($('refreshRunsBtn'))$('refreshRunsBtn').onclick=loadJobs;
+function optionalNumber(id){const value=$(id)?.value; return value?Number(value):null}
+
+let exportRowSeq=0;
+function exportRowFields(type,rid){
+  if(type==='replay')return `<label>Dataset<select id="exp_${rid}_dataset">${state.datasetOptionsHtml||''}</select></label><label>Protocol<select id="exp_${rid}_protocol"><option value="both">Both</option><option value="opcua">OPC UA</option><option value="mqtt">MQTT</option></select></label><label>Frequency Hz<input id="exp_${rid}_hz" type="number" value="5" step="0.1" min="0.1"/></label><label>Max Rows<input id="exp_${rid}_maxrows" type="number" value="100" min="1"/></label>`;
+  if(type==='sap_pp')return `<label>Entity<select id="exp_${rid}_entity">${state.sapOptionsHtml||''}</select></label><label>Filter<input id="exp_${rid}_filter" placeholder="Product eq 'FG-UREA'"/></label><label>Top<input id="exp_${rid}_top" type="number" value="10" min="1"/></label><label>Interval Seconds<input id="exp_${rid}_interval" type="number" value="10" step="0.5" min="0.1"/></label><label>Cycles<input id="exp_${rid}_cycles" type="number" placeholder="blank = until stopped" min="1"/></label>`;
+  if(type==='lims_odbc')return `<label>Entity<select id="exp_${rid}_entity">${state.limsOptionsHtml||''}</select></label><label>Mode<select id="exp_${rid}_mode"><option value="cycle">cycle</option><option value="query">query</option></select></label><label>Filter<input id="exp_${rid}_filter" placeholder="ResultStatus eq 'FAIL'"/></label><label>Top<input id="exp_${rid}_top" type="number" value="20" min="1"/></label><label>Watermark<input id="exp_${rid}_watermark" placeholder="ModifiedUTC watermark"/></label><label>Interval Seconds<input id="exp_${rid}_interval" type="number" value="15" step="0.5" min="0.1"/></label><label>Cycles<input id="exp_${rid}_cycles" type="number" placeholder="blank = until stopped" min="1"/></label><label>Excursion Probability<input id="exp_${rid}_excursion" type="number" value="0.08" step="0.01" min="0" max="1"/></label>`;
+  return `<label>Name<input id="exp_${rid}_name" value="Video export"/></label><label>Camera Count<input id="exp_${rid}_cameras" type="number" value="1" min="1" max="32"/></label><label>FPS<input id="exp_${rid}_fps" type="number" value="5" min="1" max="60"/></label><label>Resolution<select id="exp_${rid}_res"><option value="640x360">640 x 360</option><option value="1280x720">1280 x 720</option><option value="1920x1080">1920 x 1080</option></select></label><label>Duration Seconds<input id="exp_${rid}_duration" type="number" value="10" min="1"/></label><label>Segment Seconds<input id="exp_${rid}_segment" type="number" value="5" min="1"/></label><label>Linked Dataset<select id="exp_${rid}_dataset"><option value="">None</option>${state.datasetOptionsHtml||''}</select></label>`;
+}
+const exportTypeLabel={replay:'Replay',sap_pp:'SAP PP',lims_odbc:'LIMS ODBC',video:'Video'};
+window.addExportRow=function(type){
+  const rid=++exportRowSeq;
+  const row=document.createElement('div');
+  row.className='export-row';
+  row.id=`exp_${rid}`;
+  row.dataset.type=type;
+  row.style.cssText='border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px';
+  row.innerHTML=`<div class="toolbar" style="justify-content:space-between;margin-bottom:8px"><strong>${exportTypeLabel[type]} export</strong><button class="btn small danger" onclick="removeExportRow(${rid})">Remove</button></div><div class="form four">${exportRowFields(type,rid)}</div>`;
+  $('workloadExports').appendChild(row);
+};
+window.removeExportRow=function(rid){const el=$(`exp_${rid}`); if(el)el.remove();};
+function exportRowPayload(row){
+  const rid=row.id.replace('exp_','');
+  const type=row.dataset.type;
+  if(type==='replay')return {kind:'replay',value:{enabled:true,dataset_id:$(`exp_${rid}_dataset`).value||null,protocol:$(`exp_${rid}_protocol`).value,frequency_hz:Number($(`exp_${rid}_hz`).value||5),loop_mode:'loop_forever',timestamp_mode:'wall_clock',max_rows:optionalNumber(`exp_${rid}_maxrows`)}};
+  if(type==='sap_pp')return {kind:'sap_pp',value:{enabled:true,entity:$(`exp_${rid}_entity`)?.value||'A_ProductionOrder',mode:'query',filter_text:$(`exp_${rid}_filter`)?.value||'',top:optionalNumber(`exp_${rid}_top`)||10,interval_seconds:Number($(`exp_${rid}_interval`).value||10),max_cycles:optionalNumber(`exp_${rid}_cycles`)}};
+  if(type==='lims_odbc')return {kind:'lims_odbc',value:{enabled:true,entity:$(`exp_${rid}_entity`)?.value||'dbo.vw_LatestQualityResults',mode:$(`exp_${rid}_mode`)?.value||'cycle',filter_text:$(`exp_${rid}_filter`)?.value||'',top:optionalNumber(`exp_${rid}_top`)||20,watermark:$(`exp_${rid}_watermark`)?.value||null,interval_seconds:Number($(`exp_${rid}_interval`).value||15),max_cycles:optionalNumber(`exp_${rid}_cycles`),cycle_parameters:{excursion_probability:Number($(`exp_${rid}_excursion`).value||0.08)}}};
+  const [w,h]=($(`exp_${rid}_res`).value||'640x360').split('x').map(Number);
+  return {kind:'video',value:{name:$(`exp_${rid}_name`).value||'Video export',camera_count:Number($(`exp_${rid}_cameras`).value||1),fps:Number($(`exp_${rid}_fps`).value||5),width:w,height:h,duration_seconds:Number($(`exp_${rid}_duration`).value||10),segment_seconds:Number($(`exp_${rid}_segment`).value||5),linked_dataset_id:$(`exp_${rid}_dataset`)?.value||null}};
+}
+function workloadPayload(){
+  const payload={name:$('workloadName').value||'Concurrent simulator run',replays:[],sap_pp_jobs:[],lims_odbc_jobs:[],video_jobs:[]};
+  document.querySelectorAll('#workloadExports .export-row').forEach(row=>{
+    const {kind,value}=exportRowPayload(row);
+    if(kind==='replay')payload.replays.push(value);
+    else if(kind==='sap_pp')payload.sap_pp_jobs.push(value);
+    else if(kind==='lims_odbc')payload.lims_odbc_jobs.push(value);
+    else payload.video_jobs.push(value);
+  });
+  return payload;
+}
+if($('startWorkloadBtn'))$('startWorkloadBtn').onclick=async()=>{try{const payload=workloadPayload(); if(!payload.replays.length&&!payload.sap_pp_jobs.length&&!payload.lims_odbc_jobs.length&&!payload.video_jobs.length){msg('Add at least one export before starting a run.','bad');return} const d=await api('/api/workloads/concurrent-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); $('workloadResult').textContent=JSON.stringify(d,null,2); msg(`Concurrent run ${d.run_id} started with ${d.job_count} jobs`,'ok'); await loadJobs()}catch(e){msg(e.message,'bad')}};
+
+// Manually maintained. Update this list when routes are added, removed, or moved in
+// industrial_simulator/app/api.py, app/source_simulators/router.py, or portal/portal_app.py.
+const API_REFERENCE=[
+  ['Health & Status','GET','/api/health','Backend availability and parquet support'],
+  ['Health & Status','GET','/api/status','Full system status: protocol, simulator, streams'],
+  ['Generators','GET','/api/generators','List all domain generators'],
+  ['Generators','GET','/api/generators/{domain_id}/spec','Generator scenarios and parameters'],
+  ['Generators','POST','/api/generators/{domain_id}/generate','Generate a small CSV immediately'],
+  ['Generators','POST','/api/generators/{domain_id}/generate-job','Start a background generation job'],
+  ['Jobs','GET','/api/jobs','List all jobs'],
+  ['Jobs','GET','/api/jobs/{job_id}','Get job details'],
+  ['Jobs','POST','/api/jobs/{job_id}/pause','Pause a job'],
+  ['Jobs','POST','/api/jobs/{job_id}/resume','Resume a job'],
+  ['Jobs','POST','/api/jobs/{job_id}/cancel','Cancel/stop a job'],
+  ['Jobs','POST','/api/jobs/{job_id}/retry','Retry a job'],
+  ['Jobs','POST','/api/jobs/{job_id}/cleanup','Clean up a finished job'],
+  ['Workload Runs','POST','/api/workloads/concurrent-run','Start a concurrent multi-export run'],
+  ['Workload Runs','GET','/api/workloads/runs','List workload runs'],
+  ['Workload Runs','GET','/api/workloads/runs/{run_id}','Workload run detail'],
+  ['Workload Runs','POST','/api/workloads/runs/{run_id}/pause','Pause every job in a run'],
+  ['Workload Runs','POST','/api/workloads/runs/{run_id}/resume','Resume every job in a run'],
+  ['Workload Runs','POST','/api/workloads/runs/{run_id}/stop','Stop every job in a run'],
+  ['Datasets','GET','/api/datasets','List all datasets'],
+  ['Datasets','GET','/api/datasets/{dataset_id}/metadata','Dataset metadata'],
+  ['Datasets','GET','/api/datasets/{dataset_id}/preview','Preview dataset rows'],
+  ['Datasets','POST','/api/datasets/register-local','Register a local file/folder as a dataset'],
+  ['Datasets','POST','/api/datasets/{dataset_id}/scan','Scan a dataset and infer metadata'],
+  ['Datasets','POST','/api/datasets/{dataset_id}/convert','Convert dataset format'],
+  ['Datasets','DELETE','/api/datasets/{dataset_id}','Delete a dataset'],
+  ['CSV','POST','/api/csv/upload','Upload a CSV/XLSX file'],
+  ['CSV','GET','/api/csv/files','List uploaded CSV files'],
+  ['CSV','GET','/api/csv/files/{filename}/metadata','CSV file metadata'],
+  ['CSV','GET','/api/csv/files/{filename}/preview','Preview a CSV file'],
+  ['CSV','POST','/api/csv/files/{filename}/load','Load CSV metadata for replay'],
+  ['CSV','DELETE','/api/csv/files/{filename}','Delete a CSV file'],
+  ['Replay','POST','/api/replay/configure','Configure replay from a CSV file'],
+  ['Replay','POST','/api/replay/configure-files','Configure replay from multiple files'],
+  ['Replay','GET','/api/replay/jobs','List replay jobs'],
+  ['Replay','POST','/api/replay/jobs','Start a new replay job'],
+  ['Replay','POST','/api/replay/jobs/{job_id}/stop','Stop a replay job'],
+  ['Replay','POST','/api/replay/jobs/{job_id}/pause','Pause a replay job'],
+  ['Replay','POST','/api/replay/jobs/{job_id}/resume','Resume a replay job'],
+  ['Replay','POST','/api/replay/start','Start replay, all protocols'],
+  ['Replay','POST','/api/replay/stop','Stop replay, all protocols'],
+  ['Replay','POST','/api/replay/start-opcua','Start OPC UA protocol'],
+  ['Replay','POST','/api/replay/stop-opcua','Stop OPC UA protocol'],
+  ['Replay','POST','/api/replay/start-mqtt','Start MQTT protocol'],
+  ['Replay','POST','/api/replay/stop-mqtt','Stop MQTT protocol'],
+  ['Replay','POST','/api/replay/start-both','Start both OPC UA and MQTT'],
+  ['Replay','POST','/api/replay/stop-both','Stop both protocols'],
+  ['Replay','POST','/api/replay/restart','Restart replay with cursor reset'],
+  ['Replay','POST','/api/replay/reset-cursor','Reset replay to the first row'],
+  ['Replay','GET','/api/replay/status','Replay status'],
+  ['Replay','GET','/api/replay/current-values','Current tag values'],
+  ['Streams','GET','/api/streams/status','Stream hub metrics'],
+  ['Streams','GET','/api/streams/snapshot','Current tag value snapshot'],
+  ['Streams','GET','/api/streams/ndjson','Stream tag values as NDJSON'],
+  ['Streams','GET','/api/streams/sse','Stream tag values as Server-Sent Events'],
+  ['Streams','WS','/api/streams/ws','Stream tag values over WebSocket'],
+  ['Configs','GET','/api/configs','List saved configurations'],
+  ['Configs','POST','/api/configs','Create a configuration'],
+  ['Configs','GET','/api/configs/{name}','Get a configuration'],
+  ['Configs','PUT','/api/configs/{name}','Update a configuration'],
+  ['Configs','DELETE','/api/configs/{name}','Delete a configuration'],
+  ['Source Simulators','GET','/api/source-simulators','List available source simulators'],
+  ['Source Simulators','GET','/api/source-simulators/{connector_id}/spec','Source simulator spec (entities, fields)'],
+  ['Source Simulators','GET','/api/source-simulators/{connector_id}/entities','List entities for a connector'],
+  ['Source Simulators','GET','/api/source-simulators/{connector_id}/query','Query a source (filter, top, skip, watermark)'],
+  ['Source Simulators','POST','/api/source-simulators/{connector_id}/run-cycle','Run a single LIMS ODBC cycle'],
+  ['Source Simulators','GET','/api/source-simulators/jobs','List source simulation jobs'],
+  ['Source Simulators','POST','/api/source-simulators/{connector_id}/jobs','Start a source simulation job'],
+  ['Source Simulators','POST','/api/source-simulators/jobs/{job_id}/stop','Stop a source job'],
+  ['Source Simulators','POST','/api/source-simulators/jobs/{job_id}/pause','Pause a source job'],
+  ['Source Simulators','POST','/api/source-simulators/jobs/{job_id}/resume','Resume a source job'],
+  ['Video','POST','/api/video/generate-job','Start a synthetic video generation job'],
+  ['Portal','GET','/','Serve the portal UI'],
+  ['Portal','GET','/suite/status','Portal, Industrial, and API Studio health'],
+  ['Portal','GET','/launcher/config','Load current port configuration'],
+  ['Portal','POST','/launcher/save','Save port configuration'],
+  ['Portal','POST','/launcher/start','Start simulator services'],
+  ['Portal','POST','/launcher/stop','Stop simulator services'],
+  ['Portal','POST','/launcher/open-app','Open the portal in an app window'],
+  ['Portal','GET','/logs','Structured logs'],
+  ['Portal','POST','/logs/clear','Clear logs'],
+  ['Portal','POST','/mssql/test','Test a SQL Server connection'],
+  ['Portal','POST','/mssql/write-current','Write current tag values to SQL Server'],
+  ['Portal','POST','/mssql/list-databases','List SQL Server databases'],
+  ['Portal','POST','/mssql/list-tables','List SQL Server tables'],
+];
+function renderApiReferenceTable(){
+  table('apiReferenceTable',[
+    {label:'Category',key:'category'},
+    {label:'Method',render:r=>`<span class="chip">${esc(r.method)}</span>`},
+    {label:'Path',render:r=>`<code>${esc(r.path)}</code>`},
+    {label:'Purpose',key:'purpose'}
+  ],API_REFERENCE.map(([category,method,path,purpose])=>({category,method,path,purpose})));
+}
+
+function renderOverview(){
+  const s=state.streamStatus?.streams||state.status?.status?.streams||{};
+  const transports=s.transports||[];
+  statusTable('statusStreamsTable',[
+    ['NDJSON',transports.includes('ndjson')?'<span class="chip ok">available</span>':'-'],
+    ['SSE',transports.includes('sse')?'<span class="chip ok">available</span>':'-'],
+    ['WebSocket',transports.includes('websocket')?'<span class="chip ok">available</span>':'<span class="chip warn">runtime missing</span>'],
+    ['Active clients',s.active_clients??0],
+    ['Messages sent',s.messages_sent??0],
+    ['Bytes sent',fmtBytes(s.bytes_sent||0)]
+  ]);
+  const activeRuns=state.runs.filter(r=>['running','paused'].includes(r.state)).length;
+  statusTable('statusRunsTable',[
+    ['Active runs',`${activeRuns} / ${state.runs.length} total`],
+    ['Child jobs (active runs)',state.runs.filter(r=>['running','paused'].includes(r.state)).reduce((a,r)=>a+(r.job_count||0),0)],
+    ['Protocols in use',(() => {const p=new Set(); state.runs.forEach(r=>(r.protocols||[]).forEach(x=>p.add(x))); return [...p].join(', ')||'-'})()]
+  ]);
+  const sourceJobs=state.sourceJobs||[];
+  statusTable('statusSourcesTable',[
+    ['SAP PP jobs',sourceJobs.filter(j=>j.checkpoint?.connector_id==='sap_pp').length],
+    ['LIMS ODBC jobs',sourceJobs.filter(j=>j.checkpoint?.connector_id==='lims_odbc').length],
+    ['Active source jobs',sourceJobs.filter(j=>['queued','running','paused'].includes(j.state)).length]
+  ]);
+  const videoJobs=state.jobs.filter(j=>j.type==='video_generation');
+  statusTable('statusGenerationTable',[
+    ['Domain generators',state.generators.length],
+    ['Video jobs',`${videoJobs.filter(j=>['queued','running'].includes(j.state)).length} active / ${videoJobs.length} total`]
+  ]);
+  renderApiReferenceTable();
+  table('overviewJobs',[
+    {label:'Job',key:'name'},
+    {label:'State',render:r=>chip(r.state)},
+    {label:'Progress',render:r=>`<div class="progress"><span style="width:${Math.max(0,Math.min(100,r.progress_percent||0))}%"></span></div>`},
+    {label:'Updated',render:r=>esc(fmtDate(r.updated_at))}
+  ],state.jobs.slice(0,6),r=>`<button class="btn small" onclick='inspectJob("${r.job_id}")'>Inspect</button>`);
+  table('overviewDatasets',[
+    {label:'Name',key:'name'},
+    {label:'Format',key:'storage_format'},
+    {label:'Rows',render:r=>r.row_count!=null?Number(r.row_count).toLocaleString():'-'},
+    {label:'Size',render:r=>fmtBytes(r.physical_size_bytes)}
+  ],state.datasets.slice(0,6),r=>`<button class="btn small" onclick='previewDataset("${r.dataset_id}")'>Preview</button>`);
+  renderStreamMetrics();
+}
+
+function renderRowsTable(id,rows){
+  rows=rows||[];
+  const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))].slice(0,10);
+  table(id,keys.map(k=>({label:k,key:k})),rows.slice(0,50));
+}
+async function loadSources(show=true){
+  try{
+    const catalog=await api('/api/source-simulators');
+    state.sources=catalog.sources||[];
+    table('sourceCatalogTable',[
+      {label:'Connector',key:'connector_id'},
+      {label:'Name',key:'display_name'},
+      {label:'Description',key:'description'}
+    ],state.sources,(r)=>`<button class="btn small" onclick='inspectSource("${r.connector_id}")'>Inspect</button>`);
+    for(const source of state.sources){
+      if(!state.sourceSpecs[source.connector_id]){
+        state.sourceSpecs[source.connector_id]=await api(`/api/source-simulators/${source.connector_id}/spec`);
+      }
+    }
+    renderSourceSelectors();
+    await Promise.allSettled([querySap(false),queryLims(false),loadSourceJobs(false)]);
+  }catch(e){if(show)msg(e.message,'bad')}
+}
+function renderSourceSelectors(){
+  const sap=(state.sourceSpecs.sap_pp?.entities)||[];
+  const lims=(state.sourceSpecs.lims_odbc?.entities)||[];
+  const sapOptions=sap.map(e=>`<option value="${esc(e.entity)}" data-path="${esc(e.path)}">${esc(e.entity)}</option>`).join('');
+  const limsOptions=lims.map(e=>`<option value="${esc(e.entity)}">${esc(e.entity)}</option>`).join('');
+  if($('sapEntity')&&!$('sapEntity').options.length){
+    $('sapEntity').innerHTML=sapOptions;
+  }
+  if($('limsEntity')&&!$('limsEntity').options.length){
+    $('limsEntity').innerHTML=limsOptions;
+  }
+  state.sapOptionsHtml=sapOptions;
+  state.limsOptionsHtml=limsOptions;
+  updateSapUrl();
+}
+function updateSapUrl(){
+  if(!$('sapEntity')||!$('sapUrl'))return;
+  const option=$('sapEntity').selectedOptions[0];
+  const path=option?.dataset?.path||'';
+  $('sapUrl').textContent=path?`${INDUSTRIAL}${path}`:'Select an entity to view the OData URL.';
+}
+window.inspectSource=id=>details('Source simulator',state.sourceSpecs[id]||state.sources.find(s=>s.connector_id===id)||{connector_id:id});
+async function querySap(show=true){
+  if(!$('sapEntity')||!$('sapEntity').value)return;
+  try{
+    updateSapUrl();
+    const params=new URLSearchParams({entity:$('sapEntity').value});
+    if($('sapFilter').value)params.set('filter',$('sapFilter').value);
+    if($('sapTop').value)params.set('top',$('sapTop').value);
+    if($('sapSkip').value)params.set('skip',$('sapSkip').value);
+    const d=await api(`/api/source-simulators/sap_pp/query?${params.toString()}`);
+    renderRowsTable('sapRowsTable',d.rows||[]);
+  }catch(e){if(show)msg(e.message,'bad')}
+}
+async function querySapHook(kind){
+  try{
+    const option=$('sapEntity').selectedOptions[0];
+    const path=option?.dataset?.path;
+    if(!path)throw new Error('Select a SAP entity first.');
+    const suffix=kind==='latency'?'?simulate_latency=250&$top=1':'?simulate_error=true';
+    const r=await fetch(INDUSTRIAL+path+suffix);
+    let d={};try{d=await r.json()}catch{}
+    details(kind==='latency'?'SAP latency hook':'SAP error hook',{status:r.status,response:d});
+  }catch(e){msg(e.message,'bad')}
+}
+async function queryLims(show=true){
+  if(!$('limsEntity')||!$('limsEntity').value)return;
+  try{
+    const params=new URLSearchParams({entity:$('limsEntity').value});
+    if($('limsFilter').value)params.set('filter',$('limsFilter').value);
+    if($('limsTop').value)params.set('top',$('limsTop').value);
+    if($('limsWatermark').value)params.set('watermark',$('limsWatermark').value);
+    const d=await api(`/api/source-simulators/lims_odbc/query?${params.toString()}`);
+    state.latestLimsRows=d.rows||[];
+    renderRowsTable('limsRowsTable',state.latestLimsRows);
+  }catch(e){if(show)msg(e.message,'bad')}
+}
+async function runLimsCycle(){
+  try{
+    const d=await api('/api/source-simulators/lims_odbc/run-cycle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excursion_probability:0.08})});
+    $('limsCycleStatus').textContent=`Cycle ${d.cycle} completed: ${d.samples_created} samples, ${d.results_created} results, ${fmtDate(d.modified_utc)}`;
+    state.sourceSpecs.lims_odbc=null;
+    await loadSources(false);
+  }catch(e){msg(e.message,'bad')}
+}
+async function loadSourceJobs(show=true){
+  try{
+    const d=await api('/api/source-simulators/jobs');
+    state.sourceJobs=d.jobs||[];
+    table('sourceJobsTable',[
+      {label:'Job',key:'name'},
+      {label:'Data',render:r=>esc(jobDataLabel(r))},
+      {label:'State',render:r=>chip(r.state)},
+      {label:'Step',key:'current_step'},
+      {label:'Rows',render:r=>Number(r.rows_done||0).toLocaleString()},
+      {label:'Rate',render:r=>(r.rows_per_sec||0).toFixed(1)},
+      {label:'Checkpoint',render:r=>esc((r.checkpoint&&`${r.checkpoint.connector_id||''}:${r.checkpoint.entity||''} ${r.checkpoint.cycles||0} cycles`)||'-')},
+      {label:'Updated',key:'updated_at'}
+    ],state.sourceJobs,r=>{
+      if(['completed','failed','cancelled'].includes(r.state))return '<span class="muted">closed</span>';
+      if(r.state==='paused')return `<button class="btn small" onclick='resumeSourceJob("${r.job_id}")'>Resume</button> <button class="btn danger small" onclick='stopSourceJob("${r.job_id}")'>Stop</button>`;
+      return `<button class="btn small" onclick='pauseSourceJob("${r.job_id}")'>Pause</button> <button class="btn danger small" onclick='stopSourceJob("${r.job_id}")'>Stop</button>`;
+    });
+  }catch(e){if(show)msg(e.message,'bad')}
+}
+async function startSapSourceJob(){
+  try{
+    const payload={entity:$('sapEntity').value,mode:'query',filter:$('sapFilter').value,top:Number($('sapTop').value||10),interval_seconds:Number($('sapJobInterval').value||10),max_cycles:$('sapJobCycles').value?Number($('sapJobCycles').value):null};
+    const d=await api('/api/source-simulators/sap_pp/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    msg(`Started ${d.job_id}`,'ok');
+    await Promise.allSettled([loadSourceJobs(false),loadJobs()]);
+  }catch(e){msg(e.message,'bad')}
+}
+async function startLimsSourceJob(){
+  try{
+    const payload={entity:$('limsEntity').value,mode:$('limsJobMode')?.value||'cycle',filter:$('limsFilter').value,top:Number($('limsTop').value||20),watermark:$('limsWatermark').value||null,interval_seconds:Number($('limsJobInterval').value||15),max_cycles:$('limsJobCycles').value?Number($('limsJobCycles').value):null,cycle_parameters:{excursion_probability:0.08}};
+    const d=await api('/api/source-simulators/lims_odbc/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    msg(`Started ${d.job_id}`,'ok');
+    await Promise.allSettled([loadSourceJobs(false),loadJobs()]);
+  }catch(e){msg(e.message,'bad')}
+}
+window.stopSourceJob=async id=>{await api(`/api/source-simulators/jobs/${id}/stop`,{method:'POST'}); await Promise.allSettled([loadSourceJobs(false),loadJobs()]);};
+window.pauseSourceJob=async id=>{await api(`/api/source-simulators/jobs/${id}/pause`,{method:'POST'}); await Promise.allSettled([loadSourceJobs(false),loadJobs()]);};
+window.resumeSourceJob=async id=>{await api(`/api/source-simulators/jobs/${id}/resume`,{method:'POST'}); await Promise.allSettled([loadSourceJobs(false),loadJobs()]);};
+function useLatestWatermark(){
+  const latest=(state.latestLimsRows||[]).map(r=>r.ModifiedUTC).filter(Boolean).sort().pop();
+  if(latest)$('limsWatermark').value=latest;
+}
+if($('sapEntity'))$('sapEntity').onchange=()=>{updateSapUrl();querySap(false)};
+if($('querySapBtn'))$('querySapBtn').onclick=()=>querySap(true);
+if($('startSapJobBtn'))$('startSapJobBtn').onclick=startSapSourceJob;
+if($('sapErrorBtn'))$('sapErrorBtn').onclick=()=>querySapHook('error');
+if($('sapLatencyBtn'))$('sapLatencyBtn').onclick=()=>querySapHook('latency');
+if($('queryLimsBtn'))$('queryLimsBtn').onclick=()=>queryLims(true);
+if($('startLimsJobBtn'))$('startLimsJobBtn').onclick=startLimsSourceJob;
+if($('runLimsCycleBtn'))$('runLimsCycleBtn').onclick=runLimsCycle;
+if($('useLatestWatermarkBtn'))$('useLatestWatermarkBtn').onclick=useLatestWatermark;
+
+function normalizeTagName(name){return String(name||'value').replace(/[^A-Za-z0-9_]+/g,'_').replace(/^_+|_+$/g,'')||'value'}
+function replayDataType(value){if(typeof value==='number')return Number.isInteger(value)?'Integer':'Double'; if(typeof value==='boolean')return 'Boolean'; return 'String'}
+async function replayTagsForDataset(ds){
+  let columns=[];
+  let sample={};
+  try{
+    const meta=await api(`/api/datasets/${encodeURIComponent(ds.dataset_id)}/metadata`);
+    columns=(meta.schema||[]).map(c=>c.name).filter(Boolean);
+  }catch{}
+  if(!columns.length){
+    const preview=await api(`/api/datasets/${encodeURIComponent(ds.dataset_id)}/preview?limit=1`);
+    columns=preview.columns||Object.keys((preview.rows||[])[0]||{});
+    sample=(preview.rows||[])[0]||{};
+  }
+  const dataColumns=columns.filter(c=>!/^(timestamp|time|date|event_time|created_at)$/i.test(c)).slice(0,30);
+  if(!dataColumns.length)throw new Error('Dataset has no replayable columns. Scan or preview the dataset first.');
+  return dataColumns.map(c=>({enabled:true,csv_column:c,tag_name:normalizeTagName(c),node_id:`TagSimulator.${normalizeTagName(c)}`,data_type:replayDataType(sample[c])}));
+}
+async function replayJobPayload(protocol=null,datasetId=null){const ds=state.datasets.find(d=>d.dataset_id===(datasetId||$('replayDataset').value)); if(!ds)throw new Error('Select dataset'); if(ds.storage_format.includes('parquet') && $('replayLoop').value!=='once')throw new Error('Large datasets support once-only replay for now.'); return {dataset_id:ds.dataset_id,protocol:protocol||$('replayProtocol').value,frequency_hz:Number($('replayHz').value||1),loop_mode:$('replayLoop').value,timestamp_mode:$('replayTimestamp').value,max_rows:$('replayMaxRows').value?Number($('replayMaxRows').value):null,tags:await replayTagsForDataset(ds)};}
+async function startReplayJob(){const payload=await replayJobPayload(); const d=await api('/api/replay/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); msg(`Replay job ${d.job_id} started`,'ok'); await loadJobs(); showView('jobs');}
+async function startReplayProtocol(protocol){try{if($('replayProtocol'))$('replayProtocol').value=protocol; await startReplayJob()}catch(e){msg(e.message,'bad')}}
+async function startReplayForDataset(datasetId,protocol){try{if($('replayDataset'))$('replayDataset').value=datasetId; const payload=await replayJobPayload(protocol,datasetId); const d=await api('/api/replay/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); msg(`${protocol.toUpperCase()} replay job ${d.job_id} started`,'ok'); await loadJobs(); showView('jobs')}catch(e){msg(e.message,'bad')}}
+function selectDatasetAndStreams(datasetId){if($('replayDataset'))$('replayDataset').value=datasetId; showView('streams'); previewStreamSnapshot().catch(e=>msg(e.message,'bad'))}
+if($('startReplayJobBtn'))$('startReplayJobBtn').onclick=async()=>{try{await startReplayJob()}catch(e){msg(e.message,'bad')}};
+if($('refreshDatasetMatrixBtn'))$('refreshDatasetMatrixBtn').onclick=loadDatasets;
+window.stopReplayJob=async id=>{await api(`/api/replay/jobs/${id}/stop`,{method:'POST'}); await Promise.allSettled([loadJobs(),loadStatus()]);};
+window.pauseReplayJob=async id=>{await api(`/api/replay/jobs/${id}/pause`,{method:'POST'}); await Promise.allSettled([loadJobs(),loadStatus()]);};
+window.resumeReplayJob=async id=>{await api(`/api/replay/jobs/${id}/resume`,{method:'POST'}); await Promise.allSettled([loadJobs(),loadStatus()]);};
+async function loadCurrentValues(){try{const d=await api('/api/replay/current-values'); table('currentValues',[{label:'Tag',key:'tag_name'},{label:'Node',key:'node_id'},{label:'Value',key:'value'},{label:'Type',key:'data_type'},{label:'Updated',key:'last_updated'}],d.values||[])}catch{}}
+
+function dbCfg(){return {server:$('dbServer').value,port:$('dbPort').value,database:$('dbDatabase').value,auth:$('dbAuth').value,username:$('dbUser').value,password:$('dbPass').value,table:$('dbTable').value,trust_server_certificate:$('dbTrust').checked,encrypt:false}}
+$('testDbBtn').onclick=async()=>{$('sqlResult').textContent=JSON.stringify(await portal('/mssql/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}),null,2)}
+$('writeCurrentBtn').onclick=async()=>{$('sqlResult').textContent=JSON.stringify(await portal('/mssql/write-current',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}),null,2)}
+$('loadDbsBtn').onclick=async()=>{const d=await portal('/mssql/list-databases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}); $('sqlResult').textContent=JSON.stringify(d,null,2); if(d.databases)$('dbDatabase').innerHTML=d.databases.map(x=>`<option>${esc(x)}</option>`).join('')}
+$('loadTablesBtn').onclick=async()=>{const d=await portal('/mssql/list-tables',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dbCfg())}); $('sqlResult').textContent=JSON.stringify(d,null,2); if(d.tables)$('dbTable').innerHTML=d.tables.map(x=>`<option>${esc(x)}</option>`).join('')}
+
+$('startVideoJob').onclick=async()=>{try{const [w,h]=$('videoResolution').value.split('x').map(Number); const payload={name:$('videoName').value,camera_count:Number($('videoCameraCount').value),fps:Number($('videoFps').value),width:w,height:h,duration_seconds:Number($('videoDuration').value),segment_seconds:Number($('videoSegment').value),visual_mode:$('videoMode').value,linked_dataset_id:$('videoDataset').value||null}; const d=await api('/api/video/generate-job',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); msg(`Video job ${d.job_id} created`,'ok'); await loadJobs(); showView('jobs')}catch(e){msg(e.message,'bad')}};
+
+function ports(){return {industrial_web_port:$('lpIndustrial').value,portal_port:$('lpPortal').value,opcua_port:$('lpOpcua').value,mqtt_broker_port:$('lpMqtt').value,api_studio_port:CFG.api_studio_port||5050}}
+$('savePorts').onclick=async()=>{msg((await portal('/launcher/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:ports()})})).message||'Saved','ok')}
+$('launchStart').onclick=async()=>{msg((await portal('/launcher/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:ports(),include_portal:false})})).message||'Started','ok')}
+$('launchStop').onclick=async()=>{msg((await portal('/launcher/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ports:ports(),include_portal:false})})).message||'Stopped','ok')}
+
+if($('streamSnapshotBtn'))$('streamSnapshotBtn').onclick=previewStreamSnapshot;
+if($('refreshStreamsBtn'))$('refreshStreamsBtn').onclick=()=>loadStreamStatus();
+if($('copyNdjsonBtn'))$('copyNdjsonBtn').onclick=()=>copyText(streamUrls().ndjson,'NDJSON URL');
+if($('copySseBtn'))$('copySseBtn').onclick=()=>copyText(streamUrls().sse,'SSE URL');
+if($('copyWsBtn'))$('copyWsBtn').onclick=()=>copyText(streamUrls().ws,'WebSocket URL');
+if($('streamInterval'))$('streamInterval').oninput=streamUrls;
+if($('streamValueLimit'))$('streamValueLimit').oninput=streamUrls;
+if($('streamEventLimit'))$('streamEventLimit').oninput=streamUrls;
+
+async function loadLogs(show=true){try{const d=await portal('/logs?limit=300'); state.logs=d.entries||[]; table('logsTable',[{label:'Time',key:'ts'},{label:'Level',key:'level'},{label:'Service',key:'service'},{label:'Source',key:'source'},{label:'Event',key:'event'},{label:'Message',key:'message'}],state.logs,(r,i)=>`<button class="btn small" onclick='inspectLog(${i})'>Inspect</button>`)}catch(e){if(show)msg(e.message,'bad')}}
+$('refreshLogsBtn').onclick=()=>loadLogs();
+$('refreshBtn').onclick=loadAll;
+setInterval(()=>{loadJobs().catch(()=>{});loadSourceJobs(false).catch(()=>{});loadStreamStatus(false).catch(()=>{});loadCurrentValues().catch(()=>{});},3000);
+loadAll().catch(e=>msg(e.message,'bad'));
+</script>
+</body>
+</html>

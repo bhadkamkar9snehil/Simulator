@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal", label="Normal Operation"),
@@ -177,7 +177,7 @@ class PetroleumPipelineGenerator(DomainGenerator):
             leak_alarm = 1 if leak_active and elapsed >= event_start + alarm_delay_s else 0
 
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"), "scenario": request.scenario, "operating_state": state, "product": product,
+                "timestamp": historian_datetime_text(ts), "scenario": request.scenario, "operating_state": state, "product": product,
                 "station_a_suction_pressure_bar": round(a_suction + rng.gauss(0, 0.04), 3),
                 "station_a_discharge_pressure_bar": round(a_discharge + rng.gauss(0, 0.08), 3),
                 "station_b_suction_pressure_bar": round(b_suction + drift + rng.gauss(0, 0.07), 3),

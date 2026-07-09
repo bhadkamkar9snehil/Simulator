@@ -1,0 +1,15 @@
+{
+  "name": "gnfc-sap-simulator",
+  "version": "1.0.0",
+  "description": "SAP OData-style simulator for costing & pricing (GNFC contribution margin analytics prototyping)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["sap", "odata", "simulator", "mock-api"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

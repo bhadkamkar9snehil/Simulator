@@ -5,6 +5,8 @@ from app.generators.eaf_melting import EafMeltingGenerator
 from app.generators.gas_pipeline import GasPipelineGenerator
 from app.generators.rotary_equipment import RotaryEquipmentGenerator
 from app.generators.power_plant import PowerPlantGenerator
+from app.generators.polyester_fiber import PolyesterFiberGenerator
+from app.generators.gnfc_chemical_process import GnfcChemicalProcessGenerator
 from app.generators.steel_blast_furnace import BlastFurnaceGenerator
 from app.generators.steel_coke_oven import CokeOvenGenerator
 from app.generators.steel_dri_plant import DriPlantGenerator
@@ -19,6 +21,8 @@ _GENERATORS: dict[str, DomainGenerator] = {
     "gas_pipeline": GasPipelineGenerator(),
     "rotary_equipment": RotaryEquipmentGenerator(),
     "power_plant": PowerPlantGenerator(),
+    "polyester_fiber": PolyesterFiberGenerator(),
+    "gnfc_chemical_process": GnfcChemicalProcessGenerator(),
     "steel_blast_furnace": BlastFurnaceGenerator(),
     "steel_coke_oven": CokeOvenGenerator(),
     "steel_dri_plant": DriPlantGenerator(),

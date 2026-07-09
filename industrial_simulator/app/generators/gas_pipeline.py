@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal", label="Normal Operation"),
@@ -130,7 +130,7 @@ class GasPipelineGenerator(DomainGenerator):
                 p_discharge = lag(p_discharge, nom_press * (comp_rpm / 8500.0) - (0 if not choke else 10*severity), 0.1 * dt)
 
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(ts),
                 "scenario": request.scenario,
                 "operating_state": state,
                 "compressor_rpm": round(comp_rpm + rng.gauss(0, 10), 1),

@@ -14,8 +14,10 @@ def test_metadata_tmp_generated(tmp_path, monkeypatch):
     path = tmp_path / 'x.csv'
     with path.open('w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['timestamp','flow'])
-        writer.writerow(['2026-01-01T00:00:00Z','1.2'])
+        writer.writerow(['timestamp','flow','line_trip_alarm'])
+        writer.writerow(['2026-01-01T00:00:00Z','1.2','1'])
     meta = csv_manager.metadata('x.csv', 'generated')
     assert meta.row_count == 1
     assert meta.inferred_types['flow'] == 'Double'
+    enabled = {tag.csv_column: tag.enabled for tag in meta.default_tag_mappings}
+    assert enabled == {'timestamp': True, 'flow': True, 'line_trip_alarm': True}

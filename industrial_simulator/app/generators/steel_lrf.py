@@ -4,7 +4,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal", label="Normal Heat"),
@@ -104,7 +104,7 @@ class LrfGenerator(DomainGenerator):
                 bath_temp -= (0.01 * dt) # natural cooling
 
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(ts),
                 "scenario": request.scenario,
                 "operating_state": state,
                 "bath_temperature_c": round(bath_temp + rng.gauss(0, 0.5), 1),

@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal", label="Normal Operation"),
@@ -115,7 +115,7 @@ class RotaryEquipmentGenerator(DomainGenerator):
             temp_bearing_nde = lag(temp_bearing_nde, target_b_nde, 0.01 * dt)
             
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(ts),
                 "scenario": request.scenario,
                 "operating_state": state,
                 "equipment_type": eq_type,

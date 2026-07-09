@@ -5,6 +5,10 @@ __pycache__/
 .venv/
 uploads/*.csv
 generated_data/*.csv
+generated_data/datasets/
+generated_data/video/
+lakehouse/
+runtime_state/
 configs/*.json
 !uploads/.gitkeep
 !generated_data/.gitkeep

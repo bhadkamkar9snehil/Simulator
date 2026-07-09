@@ -4,7 +4,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal", label="Normal Operation"),
@@ -96,7 +96,7 @@ class CokeOvenGenerator(DomainGenerator):
             pushing_force = lag(pushing_force, target_pushing, 0.05 * dt)
 
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(ts),
                 "scenario": request.scenario,
                 "operating_state": state,
                 "flue_temperature_c": round(flue_temp + rng.gauss(0, 2.0), 1),

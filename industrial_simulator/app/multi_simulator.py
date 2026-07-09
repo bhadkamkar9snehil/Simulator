@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
 from typing import Any
 
 from app import csv_manager
 from app.models import ReplayConfig, ReplayFilesConfig, ReplayFileSelection, CurrentValuesResponse, utc_now_iso
 from app.simulator import SimulatorEngine
-from app.protocol_adapter import DualProtocolAdapter, ProtocolChannelAdapter
+from app.protocol_adapter import DualProtocolAdapter, ProtocolChannelAdapter, ReplayJobProtocolAdapter
 
 
 def _safe_prefix(filename: str) -> str:
@@ -51,14 +52,31 @@ def _enabled_count(tags: list[Any]) -> int:
 
 
 class MultiSimulatorEngine:
+    PROTOCOL_START_TIMEOUT_SECONDS = 15.0
+
     def __init__(self, adapter: DualProtocolAdapter):
         self.adapter = adapter
         self.engines: list[SimulatorEngine] = []
         self.configs: list[ReplayConfig] = []
+        self.job_ids: list[str | None] = []
         self.state = "idle"
         self.protocol: str | None = None
         self.last_error: str | None = None
         self.assignment_mode: str = "shared"
+        self._runtime_lock = threading.RLock()
+
+    def _start_error_message(self, exc: Exception, action: str) -> str:
+        if isinstance(exc, asyncio.TimeoutError):
+            return f"{action} timed out after {self.PROTOCOL_START_TIMEOUT_SECONDS:.0f}s. Check whether the OPC UA or MQTT port is already in use."
+        return str(exc) or f"{action} failed."
+
+    async def _wait_protocol(self, awaitable: Any, action: str) -> Any:
+        try:
+            return await asyncio.wait_for(awaitable, timeout=self.PROTOCOL_START_TIMEOUT_SECONDS)
+        except Exception as exc:
+            message = self._start_error_message(exc, action)
+            self.last_error = message
+            raise RuntimeError(message) from exc
 
     def _build_configs_for_files(
         self,
@@ -94,14 +112,14 @@ class MultiSimulatorEngine:
                 protocol=protocol,  # type: ignore[arg-type]
                 csv_file=item.filename,
                 csv_source=item.source,
-                frequency_hz=request.frequency_hz,
-                loop_mode=request.loop_mode,
-                timestamp_mode=request.timestamp_mode,
-                start_row=request.start_row,
+                frequency_hz=item.frequency_hz if item.frequency_hz is not None else request.frequency_hz,
+                loop_mode=item.loop_mode or request.loop_mode,
+                timestamp_mode=item.timestamp_mode or request.timestamp_mode,
+                start_row=item.start_row if item.start_row is not None else request.start_row,
                 namespace_uri=request.namespace_uri,
                 root_folder=request.root_folder,
                 node_id_prefix=request.node_id_prefix,
-                max_rows=request.max_rows,
+                max_rows=item.max_rows if item.max_rows is not None else request.max_rows,
                 mqtt_host=request.mqtt_host,
                 mqtt_port=request.mqtt_port,
                 mqtt_topic_prefix=request.mqtt_topic_prefix,
@@ -133,7 +151,7 @@ class MultiSimulatorEngine:
         combined = configs[0].model_copy(deep=True)
         combined.tags = all_tags
         publisher = ProtocolChannelAdapter(self.adapter, protocol)
-        await publisher.configure_tags(combined)
+        await self._wait_protocol(publisher.configure_tags(combined), f"{protocol.upper()} configuration")
         engines = [SimulatorEngine(publisher) for _ in configs]
         for engine, cfg in zip(engines, configs):
             await engine.configure(cfg, configure_adapter=False)
@@ -162,6 +180,7 @@ class MultiSimulatorEngine:
 
             self.engines = opc_engines + mqtt_engines
             self.configs = opc_configs + mqtt_configs
+            self.job_ids = [None] * len(self.engines)
             self.protocol = "both"
             self.assignment_mode = "separate"
             self.state = "configured"
@@ -197,11 +216,12 @@ class MultiSimulatorEngine:
             raise ValueError(f"No {request.protocol.upper()} tags are enabled. Select at least one tag before applying the plan.")
         combined = configs[0].model_copy(deep=True)
         combined.tags = all_tags
-        await self.adapter.configure_tags(combined)
+        await self._wait_protocol(self.adapter.configure_tags(combined), f"{request.protocol.upper()} configuration")
         self.engines = [SimulatorEngine(self.adapter) for _ in configs]
         for engine, cfg in zip(self.engines, configs):
             await engine.configure(cfg, configure_adapter=False)
         self.configs = configs
+        self.job_ids = [None] * len(self.engines)
         self.protocol = request.protocol
         self.assignment_mode = "shared"
         self.state = "configured"
@@ -218,16 +238,130 @@ class MultiSimulatorEngine:
 
     async def configure(self, config: ReplayConfig) -> dict[str, Any]:
         await self.stop()
-        await self.adapter.configure_tags(config)
+        await self._wait_protocol(self.adapter.configure_tags(config), f"{config.protocol.upper()} configuration")
         engine = SimulatorEngine(self.adapter)
         await engine.configure(config, configure_adapter=False)
         self.engines = [engine]
         self.configs = [config]
+        self.job_ids = [None]
         self.protocol = config.protocol
         self.assignment_mode = "shared"
         self.state = "configured"
         self.last_error = None
         return {"status": "configured", "protocol": config.protocol, "file_count": 1, "tag_count": len([t for t in config.tags if t.enabled]), "endpoint": self.adapter.get_endpoint()}
+
+    def _configs_for_protocol(self, protocol: str) -> list[ReplayConfig]:
+        return [cfg for cfg in self.configs if cfg.protocol == protocol or cfg.protocol == "both"]
+
+    def _combined_config(self, protocol: str, configs: list[ReplayConfig]) -> ReplayConfig:
+        combined = configs[-1].model_copy(deep=True)
+        combined.protocol = protocol  # type: ignore[assignment]
+        combined.tags = [tag.model_copy(deep=True) for cfg in configs for tag in cfg.tags if tag.enabled]
+        return combined
+
+    async def _reconfigure_managed_protocols(self) -> None:
+        opc_configs = self._configs_for_protocol("opcua")
+        mqtt_configs = self._configs_for_protocol("mqtt")
+
+        if opc_configs:
+            await self._wait_protocol(self.adapter.configure_channel_tags("opcua", self._combined_config("opcua", opc_configs)), "OPC UA managed configuration")
+        else:
+            await self.adapter.stop_channels("opcua")
+
+        if mqtt_configs:
+            await self._wait_protocol(self.adapter.configure_channel_tags("mqtt", self._combined_config("mqtt", mqtt_configs)), "MQTT managed configuration")
+        else:
+            await self.adapter.stop_channels("mqtt")
+
+        if opc_configs and mqtt_configs:
+            self.protocol = "both"
+        elif opc_configs:
+            self.protocol = "opcua"
+        elif mqtt_configs:
+            self.protocol = "mqtt"
+        else:
+            self.protocol = None
+            self.state = "idle"
+
+    async def add_job_config(self, job_id: str, config: ReplayConfig) -> dict[str, Any]:
+        publisher = ReplayJobProtocolAdapter(self.adapter, config.protocol)
+        engine = SimulatorEngine(publisher)
+        await engine.configure(config, configure_adapter=False)
+        with self._runtime_lock:
+            self.engines.append(engine)
+            self.configs.append(config)
+            self.job_ids.append(job_id)
+            try:
+                await self._reconfigure_managed_protocols()
+            except Exception:
+                self.engines.pop()
+                self.configs.pop()
+                self.job_ids.pop()
+                raise
+            self.assignment_mode = "managed_jobs"
+            self.state = "configured"
+            self.last_error = None
+            return self.get_job_status(job_id)
+
+    async def start_job(self, job_id: str) -> dict[str, str]:
+        engine = self._engine_for_job(job_id)
+        await engine.publisher.start()
+        result = await engine.start()
+        self.state = "running"
+        self.last_error = None
+        return result
+
+    async def stop_job(self, job_id: str, remove: bool = False) -> dict[str, str]:
+        with self._runtime_lock:
+            idx = self._job_index(job_id)
+            engine = self.engines[idx]
+        result = await engine.stop()
+        if remove:
+            await self.remove_job(job_id)
+        elif all(e.state in ("stopped", "completed", "idle") for e in self.engines):
+            self.state = "stopped"
+        return result
+
+    async def remove_job(self, job_id: str) -> None:
+        with self._runtime_lock:
+            idx = self._job_index(job_id)
+            engine = self.engines.pop(idx)
+            self.configs.pop(idx)
+            self.job_ids.pop(idx)
+        await engine.stop()
+        with self._runtime_lock:
+            await self._reconfigure_managed_protocols()
+            if self.engines and any(e.state == "running" for e in self.engines):
+                self.state = "running"
+            elif not self.engines:
+                self.state = "stopped"
+
+    def _job_index(self, job_id: str) -> int:
+        for idx, candidate in enumerate(self.job_ids):
+            if candidate == job_id:
+                return idx
+        raise KeyError(f"Replay job is not active in the simulator: {job_id}")
+
+    def _engine_for_job(self, job_id: str) -> SimulatorEngine:
+        return self.engines[self._job_index(job_id)]
+
+    def get_job_status(self, job_id: str) -> dict[str, Any]:
+        idx = self._job_index(job_id)
+        status = self.engines[idx].get_status().model_dump()
+        status["job_id"] = job_id
+        return {
+            "state": status.get("state"),
+            "protocol": status.get("protocol"),
+            "assignment_mode": "managed_jobs",
+            "configured": status.get("configured"),
+            "file_count": 1 if status.get("configured") else 0,
+            "tag_count": status.get("tag_count") or 0,
+            "row_count": status.get("row_count") or 0,
+            "emitted_count": status.get("emitted_count") or 0,
+            "cursor": status.get("cursor") or 0,
+            "last_error": status.get("last_error"),
+            "files": [status],
+        }
 
     def _engines_for_protocol(self, protocol: str):
         selected = []
@@ -239,9 +373,16 @@ class MultiSimulatorEngine:
     async def start(self) -> dict[str, str]:
         if not self.engines:
             raise ValueError("Configure at least one file first.")
-        await asyncio.gather(*(engine.start() for engine in self.engines))
-        self.state = "running"
-        return {"status": "running"}
+        try:
+            await self._wait_protocol(self.adapter.start(), "Protocol start")
+            await asyncio.gather(*(engine.start() for engine in self.engines))
+            self.state = "running"
+            self.last_error = None
+            return {"status": "running"}
+        except Exception as exc:
+            self.state = "error"
+            self.last_error = self._start_error_message(exc, "Protocol start")
+            raise RuntimeError(self.last_error) from exc
 
     async def start_protocol(self, protocol: str) -> dict[str, str]:
         if protocol not in ("opcua", "mqtt", "both"):
@@ -249,16 +390,19 @@ class MultiSimulatorEngine:
         selected = self._engines_for_protocol(protocol)
         if not selected:
             raise ValueError(f"No configured {protocol.upper()} replay plan. Apply the plan first.")
-        if protocol in ("opcua", "both"):
-            await self.adapter.opcua.start()
-        if protocol in ("mqtt", "both"):
-            await self.adapter.mqtt.start()
-        await asyncio.gather(*(engine.start() for engine in selected))
-        if all((e.state == "running" for e in self.engines)):
+        try:
+            if protocol in ("opcua", "both"):
+                await self._wait_protocol(self.adapter.opcua.start(), "OPC UA start")
+            if protocol in ("mqtt", "both"):
+                await self._wait_protocol(self.adapter.mqtt.start(), "MQTT start")
+            await asyncio.gather(*(engine.start() for engine in selected))
             self.state = "running"
-        else:
-            self.state = "running"
-        return {"status": "running", "protocol": protocol}
+            self.last_error = None
+            return {"status": "running", "protocol": protocol}
+        except Exception as exc:
+            self.state = "error"
+            self.last_error = self._start_error_message(exc, f"{protocol.upper()} start")
+            raise RuntimeError(self.last_error) from exc
 
     async def stop(self) -> dict[str, str]:
         await asyncio.gather(*(engine.stop() for engine in self.engines), return_exceptions=True)
@@ -290,8 +434,18 @@ class MultiSimulatorEngine:
 
     def get_status(self) -> dict[str, Any]:
         statuses = [e.get_status().model_dump() for e in self.engines]
+        for status, job_id in zip(statuses, self.job_ids):
+            if job_id:
+                status["job_id"] = job_id
+        if statuses and self.state == "running":
+            if any(s.get("state") == "error" for s in statuses):
+                self.state = "error"
+                self.last_error = next((s.get("last_error") for s in statuses if s.get("last_error")), self.last_error)
+            elif all(s.get("state") == "completed" for s in statuses):
+                self.state = "completed"
         tag_count = sum(s.get("tag_count") or 0 for s in statuses)
         row_count = sum(s.get("row_count") or 0 for s in statuses)
+        emitted_count = sum(s.get("emitted_count") or 0 for s in statuses)
         opc_files = [c.csv_file for c in self.configs if c.protocol == "opcua"]
         mqtt_files = [c.csv_file for c in self.configs if c.protocol == "mqtt"]
         return {
@@ -308,6 +462,7 @@ class MultiSimulatorEngine:
             "frequency_hz": self.configs[0].frequency_hz if self.configs else None,
             "cursor": min((s.get("cursor") or 0 for s in statuses), default=0),
             "row_count": row_count,
+            "emitted_count": emitted_count,
             "tag_count": tag_count,
             "last_error": self.last_error,
             "files": statuses,

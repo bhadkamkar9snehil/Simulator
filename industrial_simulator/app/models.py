@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DataType = Literal["Double", "Int64", "Boolean", "String"]
 LoopMode = Literal["loop_forever", "once", "hold_last", "ping_pong"]
@@ -11,6 +11,15 @@ SimulatorState = Literal["idle", "configured", "running", "stopped", "completed"
 CsvSource = Literal["uploaded", "generated", "sample"]
 ProtocolMode = Literal["opcua", "mqtt", "both"]
 TagProtocol = Literal["opcua", "mqtt"]
+DatasetState = Literal["registered", "scanning", "ready", "generating", "converting", "partial", "failed", "cancelled", "deleted"]
+DatasetSource = Literal["generated", "uploaded", "registered", "lakehouse", "converted", "sample"]
+StorageFormat = Literal["csv", "xlsx", "jsonl", "ndjson", "parquet", "parquet_folder"]
+JobState = Literal["queued", "running", "paused", "completed", "failed", "cancelled", "partial", "cleanup_required"]
+JobType = Literal["generate_dataset", "scan_dataset", "convert_dataset", "replay_dataset", "lakehouse_write", "sql_projection", "video_generation", "stream_ingest", "source_simulation"]
+TargetBasis = Literal["physical_bytes", "logical_bytes", "stream_bytes", "rows", "duration"]
+OutputFormat = Literal["csv", "parquet", "lakehouse"]
+SpeedMode = Literal["max_throughput", "realistic_rate"]
+SchemaPolicy = Literal["fail", "quarantine"]
 
 
 class ScenarioSpec(BaseModel):
@@ -53,6 +62,26 @@ class GenerateRequest(BaseModel):
     output_filename: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     load_into_replay: bool = False
+
+
+class GenerateJobRequest(BaseModel):
+    scenario: str
+    name: str = "Generated dataset"
+    output_format: OutputFormat = "parquet"
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    target_basis: TargetBasis = "physical_bytes"
+    target_value: int | float | None = None
+    speed_mode: SpeedMode = "max_throughput"
+    rows_per_batch: int = Field(default=10000, ge=1)
+    rows_per_part: int = Field(default=1_000_000, ge=1)
+    compression: str = "zstd"
+    partition_columns: list[str] = Field(default_factory=list)
+    output_sinks: list[str] = Field(default_factory=lambda: ["dataset"])
+    schema_policy: SchemaPolicy = "fail"
+    checkpoint_interval_parts: int = Field(default=1, ge=1)
+    lakehouse_root: str | None = None
+    sql_projection: dict[str, Any] | None = None
+    video: dict[str, Any] | None = None
 
 
 class GenerateResponse(BaseModel):
@@ -107,8 +136,9 @@ class TagMapping(BaseModel):
 
 class ReplayConfig(BaseModel):
     protocol: ProtocolMode = "opcua"
-    csv_file: str
+    csv_file: str = ""
     csv_source: CsvSource = "generated"
+    dataset_id: str | None = None
     frequency_hz: float = Field(default=1.0, gt=0)
     loop_mode: LoopMode = "loop_forever"
     timestamp_mode: TimestampMode = "wall_clock"
@@ -142,9 +172,68 @@ class ReplayConfig(BaseModel):
         return tags
 
 
+class WorkloadReplayOptions(BaseModel):
+    enabled: bool = True
+    dataset_id: str | None = None
+    csv_file: str = "sample_pipeline_normal.csv"
+    csv_source: CsvSource = "sample"
+    protocol: ProtocolMode = "both"
+    frequency_hz: float = Field(default=5.0, gt=0)
+    loop_mode: LoopMode = "loop_forever"
+    timestamp_mode: TimestampMode = "wall_clock"
+    max_rows: int | None = Field(default=100, ge=1)
+
+
+class WorkloadSourceJobOptions(BaseModel):
+    enabled: bool = True
+    entity: str
+    mode: Literal["query", "cycle"] = "query"
+    filter_text: str = ""
+    top: int | None = Field(default=10, ge=1)
+    watermark: str | None = None
+    interval_seconds: float = Field(default=10.0, gt=0)
+    max_cycles: int | None = Field(default=None, ge=1)
+    cycle_parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkloadRunRequest(BaseModel):
+    name: str = "Concurrent simulator run"
+    run_id: str | None = None
+
+    # Preferred shape: independent, repeatable exports. Each list entry starts its own
+    # job with its own dataset/entity/protocol/settings, so a single concurrent run can
+    # mix e.g. two differently-configured replays, a SAP PP feed, and a video job.
+    replays: list[WorkloadReplayOptions] = Field(default_factory=list)
+    sap_pp_jobs: list[WorkloadSourceJobOptions] = Field(default_factory=list)
+    lims_odbc_jobs: list[WorkloadSourceJobOptions] = Field(default_factory=list)
+    video_jobs: list["VideoJobRequest"] = Field(default_factory=list)
+
+    # Legacy singular fields, folded onto the front of the matching list above for
+    # backward compatibility with older callers/tests.
+    replay: WorkloadReplayOptions | None = None
+    sap_pp: WorkloadSourceJobOptions | None = None
+    lims_odbc: WorkloadSourceJobOptions | None = None
+
+    @model_validator(mode="after")
+    def _fold_legacy_singular_fields(self) -> "WorkloadRunRequest":
+        if self.replay is not None and self.replay.enabled:
+            self.replays.insert(0, self.replay)
+        if self.sap_pp is not None and self.sap_pp.enabled:
+            self.sap_pp_jobs.insert(0, self.sap_pp)
+        if self.lims_odbc is not None and self.lims_odbc.enabled:
+            self.lims_odbc_jobs.insert(0, self.lims_odbc)
+        return self
+
+
 class ReplayFileSelection(BaseModel):
     filename: str
     source: CsvSource = "uploaded"
+    dataset_id: str | None = None
+    frequency_hz: float | None = Field(default=None, gt=0)
+    loop_mode: LoopMode | None = None
+    timestamp_mode: TimestampMode | None = None
+    start_row: int | None = Field(default=None, ge=0)
+    max_rows: int | None = None
 
 
 class ProtocolTagSelection(BaseModel):
@@ -200,6 +289,7 @@ class ReplayStatus(BaseModel):
     frequency_hz: float | None = None
     cursor: int = 0
     row_count: int = 0
+    emitted_count: int = 0
     tag_count: int = 0
     loop_mode: LoopMode | None = None
     timestamp_mode: TimestampMode | None = None
@@ -217,6 +307,92 @@ class CurrentValue(BaseModel):
 class CurrentValuesResponse(BaseModel):
     updated_at: str | None = None
     values: list[CurrentValue] = Field(default_factory=list)
+
+
+class DatasetSchemaField(BaseModel):
+    name: str
+    data_type: str = "String"
+
+
+class DatasetManifest(BaseModel):
+    dataset_id: str
+    name: str
+    description: str = ""
+    source: DatasetSource = "generated"
+    storage_format: StorageFormat = "csv"
+    state: DatasetState = "registered"
+    schema: list[DatasetSchemaField] = Field(default_factory=list)
+    column_count: int = 0
+    row_count: int | None = None
+    logical_size_bytes: int | None = None
+    physical_size_bytes: int = 0
+    part_count: int = 0
+    partition_columns: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+    modified_at: str | None = None
+    ready_for_replay: bool = False
+    producer_job_id: str | None = None
+    scan_job_id: str | None = None
+    scan_status: dict[str, Any] = Field(default_factory=dict)
+    path: str | None = None
+    error: str | None = None
+
+
+class RegisterDatasetRequest(BaseModel):
+    path: str
+    name: str | None = None
+    description: str = ""
+    source: DatasetSource = "registered"
+
+
+class ConvertDatasetRequest(BaseModel):
+    output_format: OutputFormat = "parquet"
+    rows_per_part: int = Field(default=1_000_000, ge=1)
+    compression: str = "zstd"
+    schema_policy: SchemaPolicy = "fail"
+
+
+class JobRecord(BaseModel):
+    job_id: str
+    name: str
+    type: JobType
+    state: JobState = "queued"
+    progress_percent: float = 0.0
+    current_step: str = ""
+    message: str = ""
+    rows_done: int = 0
+    bytes_done: int = 0
+    logical_bytes_done: int = 0
+    physical_bytes_done: int = 0
+    parts_done: int = 0
+    commits_done: int = 0
+    rows_per_sec: float = 0.0
+    mb_per_sec: float = 0.0
+    queue_depth: int = 0
+    active_bottleneck: str = ""
+    started_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None
+    checkpoint: dict[str, Any] = Field(default_factory=dict)
+    output_paths: list[str] = Field(default_factory=list)
+    dataset_id: str | None = None
+    error: str | None = None
+
+
+class VideoJobRequest(BaseModel):
+    name: str = "Synthetic video"
+    run_id: str | None = None
+    camera_count: int = Field(default=1, ge=1, le=32)
+    camera_id_prefix: str = "CAM"
+    fps: int = Field(default=5, ge=1, le=60)
+    width: int = Field(default=640, ge=64, le=3840)
+    height: int = Field(default=360, ge=64, le=2160)
+    duration_seconds: int = Field(default=10, ge=1)
+    segment_seconds: int = Field(default=5, ge=1)
+    visual_mode: str = "moving_gradient"
+    overlay_timestamp: bool = True
+    overlay_run_id: bool = True
+    linked_dataset_id: str | None = None
 
 
 class SavedConfig(BaseModel):
@@ -238,3 +414,6 @@ class ConfigSummary(BaseModel):
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+WorkloadRunRequest.model_rebuild()

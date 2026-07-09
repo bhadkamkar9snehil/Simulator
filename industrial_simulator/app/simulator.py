@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
-from app import csv_manager
+from app import csv_manager, dataset_manager
 from app.models import ReplayConfig, ReplayStatus, CurrentValue, CurrentValuesResponse, utc_now_iso
 from app.type_inference import convert_value
 from typing import Protocol
+
+logger = logging.getLogger("industrial.replay")
+
+
+def _log_event(level: int, event: str, message: str, **fields: Any) -> None:
+    logger.log(level, message, extra={"event": event, "fields": fields, "service": "Industrial", "source": "replay"})
 
 
 class ProtocolPublisher(Protocol):
@@ -17,12 +26,51 @@ class ProtocolPublisher(Protocol):
     def get_endpoint(self) -> str: ...
 
 
+class IndexedCsvRows:
+    def __init__(self, path: Path, max_rows: int | None = None):
+        self.path = path
+        self.columns: list[str] = []
+        self.offsets: list[int] = []
+        with path.open("r", newline="", encoding="utf-8-sig") as f:
+            header_line = f.readline()
+            if not header_line:
+                raise ValueError("File has no header.")
+            self.columns = [c.strip() for c in next(csv.reader([header_line]))]
+            if not self.columns:
+                raise ValueError("File has no header.")
+            if len(set(self.columns)) != len(self.columns):
+                raise ValueError("File has duplicate columns.")
+            while max_rows is None or len(self.offsets) < max_rows:
+                offset = f.tell()
+                line = f.readline()
+                if not line:
+                    break
+                self.offsets.append(offset)
+
+    @property
+    def row_count(self) -> int:
+        return len(self.offsets)
+
+    def row(self, index: int) -> dict[str, str]:
+        if index < 0 or index >= self.row_count:
+            raise IndexError("CSV row index out of range.")
+        with self.path.open("r", newline="", encoding="utf-8-sig") as f:
+            f.seek(self.offsets[index])
+            line = f.readline()
+        values = next(csv.reader([line]))
+        row = {col: values[i] if i < len(values) else "" for i, col in enumerate(self.columns)}
+        return row
+
+
 class SimulatorEngine:
     def __init__(self, publisher: ProtocolPublisher):
         self.publisher = publisher
         self.config: ReplayConfig | None = None
         self.columns: list[str] = []
         self.rows: list[dict[str, str]] = []
+        self.indexed_rows: IndexedCsvRows | None = None
+        self.row_count = 0
+        self.emitted_count = 0
         self.cursor = 0
         self.direction = 1
         self.state = "idle"
@@ -33,13 +81,37 @@ class SimulatorEngine:
 
     async def configure(self, config: ReplayConfig, configure_adapter: bool = True) -> dict[str, Any]:
         await self.stop()
-        columns, rows = csv_manager.read_full_csv(config.csv_file, config.csv_source, config.max_rows)
+        path: Path
+        if config.dataset_id:
+            manifest = dataset_manager.get_dataset(config.dataset_id)
+            if manifest.storage_format in ("parquet", "parquet_folder"):
+                raise ValueError("Parquet dataset replay is planned but requires the pyarrow-backed columnar reader. Use CSV replay or generate a CSV dataset for this run.")
+            if manifest.storage_format != "csv":
+                raise ValueError("Replay currently supports CSV datasets.")
+            path = dataset_manager.dataset_path(manifest)
+            config.csv_file = path.name
+            if manifest.source in {"uploaded", "generated", "sample"}:
+                config.csv_source = manifest.source  # type: ignore[assignment]
+        else:
+            if not config.csv_file:
+                raise ValueError("Select a CSV file or dataset before configuring replay.")
+            path = csv_manager.resolve_csv_path(config.csv_file, config.csv_source)
+        _log_event(logging.INFO, "replay.engine.configure.requested", "Configuring replay engine.", file=config.csv_file, source=config.csv_source, protocol=config.protocol, timestamp_mode=config.timestamp_mode, loop_mode=config.loop_mode, frequency_hz=config.frequency_hz)
+        rows: list[dict[str, str]] = []
+        indexed_rows: IndexedCsvRows | None = None
+        if path.suffix.lower() == ".csv":
+            indexed_rows = IndexedCsvRows(path, config.max_rows)
+            columns = indexed_rows.columns
+            row_count = indexed_rows.row_count
+        else:
+            columns, rows = csv_manager.read_full_csv(config.csv_file, config.csv_source, config.max_rows)
+            row_count = len(rows)
         if config.timestamp_mode in ("csv_timestamp_ignore_rate", "relative_from_csv"):
             if "timestamp" not in columns:
                 raise ValueError("CSV must have a 'timestamp' column for the selected timestamp mode.")
-        if not rows:
+        if row_count == 0:
             raise ValueError("CSV has no data rows.")
-        if config.start_row >= len(rows):
+        if config.start_row >= row_count:
             raise ValueError("start_row must be less than row_count.")
         missing = [t.csv_column for t in config.tags if t.enabled and t.csv_column not in columns]
         if missing:
@@ -47,22 +119,28 @@ class SimulatorEngine:
         self.config = config
         self.columns = columns
         self.rows = rows
+        self.indexed_rows = indexed_rows
+        self.row_count = row_count
         self.cursor = config.start_row
         self.direction = 1
         self.current_values.clear()
+        self.emitted_count = 0
         if configure_adapter:
             await self.publisher.configure_tags(config)
         self.state = "configured"
         self.last_error = None
+        _log_event(logging.INFO, "replay.engine.configure.completed", "Replay engine configured.", file=config.csv_file, source=config.csv_source, protocol=config.protocol, rows=row_count, columns=len(columns), tags=len([t for t in config.tags if t.enabled]), start_row=config.start_row)
         return {"status": "configured", "protocol": config.protocol, "tag_count": len([t for t in config.tags if t.enabled]), "endpoint": self.publisher.get_endpoint()}
 
     async def start(self) -> dict[str, str]:
         if self.config is None:
             raise ValueError("Cannot start before replay is configured.")
         if self.state == "running":
+            _log_event(logging.INFO, "replay.engine.start.skipped", "Replay engine already running.", file=self.config.csv_file, source=self.config.csv_source)
             return {"status": "running"}
         self.state = "running"
         self.task = asyncio.create_task(self._loop())
+        _log_event(logging.INFO, "replay.engine.start.completed", "Replay engine started.", file=self.config.csv_file, source=self.config.csv_source, cursor=self.cursor, rows=self.row_count)
         return {"status": "running"}
 
     async def stop(self) -> dict[str, str]:
@@ -75,6 +153,7 @@ class SimulatorEngine:
         self.task = None
         if self.config is not None and self.state != "completed":
             self.state = "stopped"
+            _log_event(logging.INFO, "replay.engine.stop.completed", "Replay engine stopped.", file=self.config.csv_file, source=self.config.csv_source, cursor=self.cursor, state=self.state)
         return {"status": self.state}
 
     async def restart(self) -> dict[str, Any]:
@@ -94,10 +173,15 @@ class SimulatorEngine:
         return {"status": "ok", "cursor": self.cursor}
 
     def _get_row_datetime(self, row_idx: int) -> datetime:
-        ts_str = self.rows[row_idx].get("timestamp")
+        ts_str = self._row_at(row_idx).get("timestamp")
         if not ts_str:
             return datetime.now(timezone.utc)
-        return datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(ts_str).strip().replace("Z", "+00:00"))
+
+    def _row_at(self, row_idx: int) -> dict[str, str]:
+        if self.indexed_rows is not None:
+            return self.indexed_rows.row(row_idx)
+        return self.rows[row_idx]
 
     async def _loop(self) -> None:
         assert self.config is not None
@@ -136,20 +220,27 @@ class SimulatorEngine:
             except Exception as exc:
                 self.last_error = str(exc)
                 self.state = "error"
+                logger.exception(
+                    "Replay loop failed.",
+                    extra={
+                        "event": "replay.engine.loop.failed",
+                        "fields": {"file": self.config.csv_file, "source": self.config.csv_source, "cursor": self.cursor},
+                        "service": "Industrial",
+                        "source": "replay",
+                    },
+                )
                 break
 
     async def emit_once(self) -> None:
         assert self.config is not None
-        row = self.rows[self.cursor]
+        row = self._row_at(self.cursor)
         values_for_mqtt: dict[str, tuple[Any, str]] = {}
         mqtt_metadata: dict[str, dict[str, Any]] = {}
         
         if self.config.timestamp_mode == "csv_timestamp_ignore_rate":
             ts_str = row.get("timestamp")
             if ts_str:
-                timestamp = str(ts_str).replace(" ", "T")
-                if not timestamp.endswith("Z") and "+" not in timestamp:
-                    timestamp += "Z"
+                timestamp = str(ts_str).strip().replace(" ", "T")
             else:
                 timestamp = utc_now_iso()
         else:
@@ -169,6 +260,7 @@ class SimulatorEngine:
             mqtt_metadata[tag.node_id] = self._mqtt_metadata_for_row(row, tag.csv_column)
         self.updated_at = timestamp
         await self.publisher.update_values(values_for_mqtt, timestamp=timestamp, current_values=self.current_values, mqtt_metadata=mqtt_metadata)
+        self.emitted_count += 1
 
     def _mqtt_metadata_for_row(self, row: dict[str, Any], csv_column: str) -> dict[str, Any]:
         metadata: dict[str, Any] = {"tag": csv_column, "quality": "GOOD"}
@@ -217,7 +309,7 @@ class SimulatorEngine:
 
     def _advance_cursor(self) -> None:
         assert self.config is not None
-        last = len(self.rows) - 1
+        last = self.row_count - 1
         start = self.config.start_row
         mode = self.config.loop_mode
         if mode == "loop_forever":
@@ -249,7 +341,8 @@ class SimulatorEngine:
             csv_source=self.config.csv_source if self.config else None,
             frequency_hz=self.config.frequency_hz if self.config else None,
             cursor=self.cursor,
-            row_count=len(self.rows),
+            row_count=self.row_count,
+            emitted_count=self.emitted_count,
             tag_count=len([t for t in self.config.tags if t.enabled]) if self.config else 0,
             loop_mode=self.config.loop_mode if self.config else None,
             timestamp_mode=self.config.timestamp_mode if self.config else None,

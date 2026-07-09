@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="normal_heat", label="Normal Heat"),
@@ -126,7 +126,7 @@ class EafMeltingGenerator(DomainGenerator):
             if cooling_fault: alarm = 305
             if delayed: alarm = 407
             rows.append({
-                "timestamp": (start_time + timedelta(seconds=t)).isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(start_time + timedelta(seconds=t)),
                 "scenario": request.scenario, "phase": phase, "heat_id": heat_id,
                 "transformer_power_mw": round(max(0, power), 3),
                 "electrode_current_ka": round(max(0, current), 3),

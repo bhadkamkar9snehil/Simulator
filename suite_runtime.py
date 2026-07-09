@@ -4,15 +4,24 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from functools import lru_cache
 from pathlib import Path
+from industrial_logging import (
+    clear_logs as structured_clear_logs,
+    emit_event,
+    log_text,
+    logs_payload as structured_logs_payload,
+    tail_text,
+)
 
 ROOT = Path(__file__).resolve().parent
 BUNDLED_RUNTIME_DIR = ROOT / "runtime" / "python"
@@ -50,21 +59,24 @@ ENV_PORT_MAP = {
 processes: dict[str, subprocess.Popen] = {}
 
 
-def log_line(text: str) -> None:
-    line = f"{time.strftime('%H:%M:%S')}  {text}"
-    try:
-        old = LOG_FILE.read_text(encoding="utf-8") if LOG_FILE.exists() else ""
-        LOG_FILE.write_text(old + line + "\n", encoding="utf-8")
-    except Exception:
-        pass
+def log_line(text: str, source: str = "Suite", level: str | None = None) -> None:
+    log_text(text, service="Suite", source=source, level=level, event="suite.message")
 
 
 def tail_log(lines: int = 120) -> str:
-    try:
-        data = LOG_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
-        return "\n".join(data[-lines:])
-    except Exception:
-        return ""
+    return tail_text(lines)
+
+
+def log_entries(limit: int = 300, level: str = "", source: str = "", query: str = "", service: str = "", event: str = "") -> list[dict]:
+    return structured_logs_payload(limit=limit, level=level, source=source, query=query, service=service, event=event)["entries"]
+
+
+def logs_payload(limit: int = 300, level: str = "", source: str = "", query: str = "", service: str = "", event: str = "") -> dict:
+    return structured_logs_payload(limit=limit, level=level, source=source, query=query, service=service, event=event)
+
+
+def clear_log() -> None:
+    structured_clear_logs()
 
 
 def run_hidden(
@@ -533,25 +545,86 @@ def reader_thread(name: str, proc: subprocess.Popen) -> None:
         for line in proc.stdout:
             text = line.strip()
             if text:
-                log_line(f"[{name}] {text}")
+                log_text(text, service=name, source="stdout", event="service.stdout", fields={"pid": proc.pid})
     except Exception as exc:
-        log_line(f"[{name}] reader stopped: {exc}")
+        emit_event("service.stdout_reader.failed", "Service stdout reader stopped.", level="ERROR", service=name, source="stdout", fields={"pid": getattr(proc, "pid", None)}, exc=exc)
 
 
-def start_service(name: str, cmd: list[str], cwd: Path, env: dict[str, str]) -> bool:
+def probe_http(url: str, timeout: float = 1.5) -> tuple[bool, str]:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            if 200 <= response.status < 500:
+                return True, f"HTTP {response.status}"
+            return False, f"HTTP {response.status}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def wait_for_http(url: str, proc: subprocess.Popen, timeout: float = 12.0) -> tuple[bool, str]:
+    deadline = time.monotonic() + timeout
+    last_error = "Service did not become ready."
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False, f"Process exited with code {proc.returncode}. {last_error}"
+        ok, msg = probe_http(url, timeout=1.0)
+        if ok:
+            return True, msg
+        last_error = msg
+        time.sleep(0.25)
+    return False, last_error
+
+
+def wait_for_tcp_port(port: int, proc: subprocess.Popen, timeout: float = 12.0) -> tuple[bool, str]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return False, f"Process exited with code {proc.returncode} before TCP port {port} became ready."
+        if is_port_listening(port):
+            return True, f"TCP {port}"
+        time.sleep(0.25)
+    return False, f"TCP port {port} did not become ready."
+
+
+def start_service(
+    name: str,
+    cmd: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    health_url: str | None = None,
+    tcp_port: int | None = None,
+) -> bool:
     existing = processes.get(name)
     if existing and existing.poll() is None:
-        log_line(f"{name} is already running.")
+        emit_event("service.start.skipped", f"{name} is already running.", service=name, source="suite_runtime", fields={"pid": existing.pid})
         return True
-    log_line(f"Starting {name}...")
+    if health_url:
+        ready, detail = probe_http(health_url)
+        if ready:
+            emit_event("service.start.adopted", f"{name} is already responding.", service=name, source="suite_runtime", fields={"url": health_url, "detail": detail})
+            return True
+    if tcp_port and is_port_listening(tcp_port):
+        emit_event("service.start.adopted", f"{name} is already listening.", service=name, source="suite_runtime", fields={"port": tcp_port, "detail": f"TCP {tcp_port}"})
+        return True
+    emit_event("service.start.requested", f"Starting {name}.", service=name, source="suite_runtime", fields={"cwd": cwd, "command": " ".join(cmd)})
     try:
         proc = run_hidden(cmd, cwd=cwd, env=env, wait=False)
         processes[name] = proc
         threading.Thread(target=reader_thread, args=(name, proc), daemon=True).start()
         save_pids()
+        if health_url:
+            ready, detail = wait_for_http(health_url, proc)
+            if not ready:
+                emit_event("service.start.failed", f"{name} did not become ready.", level="ERROR", service=name, source="suite_runtime", fields={"pid": proc.pid, "url": health_url, "detail": detail})
+                return False
+        if tcp_port:
+            ready, detail = wait_for_tcp_port(tcp_port, proc)
+            if not ready:
+                emit_event("service.start.failed", f"{name} did not become ready.", level="ERROR", service=name, source="suite_runtime", fields={"pid": proc.pid, "port": tcp_port, "detail": detail})
+                return False
+        emit_event("service.start.completed", f"{name} started.", service=name, source="suite_runtime", fields={"pid": proc.pid, "url": health_url or "", "port": tcp_port or ""})
         return True
     except Exception as exc:
-        log_line(f"ERROR starting {name}: {exc}")
+        emit_event("service.start.failed", f"{name} failed to start.", level="ERROR", service=name, source="suite_runtime", fields={"cwd": cwd, "command": " ".join(cmd)}, exc=exc)
         return False
 
 
@@ -592,16 +665,16 @@ def open_app_window(url: str) -> bool:
                     stderr=subprocess.DEVNULL,
                     creationflags=CREATE_NO_WINDOW,
                 )
-                log_line(f"Opened application window: {url}")
+                emit_event("browser.open.completed", "Opened application window.", service="Portal", source="suite_runtime", fields={"url": url, "browser": exe})
                 return True
         except Exception as exc:
-            log_line(f"Could not open app window with {exe}: {exc}")
+            emit_event("browser.open.failed", "Could not open app window.", level="WARN", service="Portal", source="suite_runtime", fields={"url": url, "browser": exe}, exc=exc)
     try:
         webbrowser.open(url)
-        log_line(f"Opened portal in default browser: {url}")
+        emit_event("browser.open.default", "Opened portal in default browser.", service="Portal", source="suite_runtime", fields={"url": url})
         return False
     except Exception as exc:
-        log_line(f"Could not open browser: {exc}")
+        emit_event("browser.open.failed", "Could not open browser.", level="ERROR", service="Portal", source="suite_runtime", fields={"url": url}, exc=exc)
         return False
 
 
@@ -612,13 +685,14 @@ def start_services(
 ) -> tuple[bool, str]:
     errors = validate_ports(ports)
     if errors:
+        emit_event("suite.start.rejected", "Invalid port configuration.", level="ERROR", service="Suite", source="suite_runtime", fields={"errors": "; ".join(errors), "ports": ports})
         return False, "; ".join(errors)
     save_ports(ports)
     ok, msg = setup_environment()
     if not ok:
         return False, msg
     env = env_for(ports)
-    log_line("Writing frontend launcher configuration...")
+    emit_event("launcher_config.write.requested", "Writing frontend launcher configuration.", service="Suite", source="suite_runtime", fields={"ports": ports})
     code, out = run_hidden(
         [str(VENV_PY), "write_launcher_config.py"],
         cwd=ROOT / "industrial_simulator",
@@ -629,36 +703,57 @@ def start_services(
     if out.strip():
         log_line(out.strip()[-1500:])
     if code != 0:
+        emit_event("launcher_config.write.failed", "Could not write launcher config.", level="ERROR", service="Suite", source="suite_runtime", fields={"return_code": code, "output": out[-3000:]})
         return False, "Could not write launcher config."
 
     service_py = str(VENV_PY)
+    ok_mqtt = start_service(
+        "MQTT Broker",
+        [service_py, "-m", "app.mqtt_broker"],
+        ROOT / "industrial_simulator",
+        env,
+        tcp_port=int(ports["mqtt_broker_port"]),
+    )
     ok1 = start_service(
         "Industrial",
         [service_py, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", ports["industrial_web_port"]],
         ROOT / "industrial_simulator",
         env,
+        health_url=f"http://127.0.0.1:{ports['industrial_web_port']}/api/health",
     )
-    ok2 = start_service("API Studio", [service_py, "app.py"], ROOT / "api_studio", env)
+    # API Studio is legacy tooling. The portal is the supported user-facing
+    # surface, so do not start the API builder as part of the simulator suite.
+    ok2 = True
     ok3 = True
     if include_portal:
-        ok3 = start_service("Portal", [service_py, "portal/portal_app.py"], ROOT, env)
-    time.sleep(1.5)
+        ok3 = start_service(
+            "Portal",
+            [service_py, "portal/portal_app.py"],
+            ROOT,
+            env,
+            health_url=f"http://127.0.0.1:{ports['portal_port']}/launcher/config",
+        )
     if open_browser_flag:
         open_app_window(f"http://localhost:{ports['portal_port']}")
-    return bool(ok1 and ok2 and ok3), "Services started."
+    ok = bool(ok_mqtt and ok1 and ok2 and ok3)
+    emit_event("suite.start.completed" if ok else "suite.start.failed", "Suite start completed." if ok else "Suite start failed.", level="INFO" if ok else "ERROR", service="Suite", source="suite_runtime", fields={"mqtt_broker": ok_mqtt, "industrial": ok1, "api_studio": ok2, "portal": ok3, "ports": ports})
+    return ok, "Services started." if ok else "One or more services failed to start."
 
 
 def terminate_process(proc: subprocess.Popen) -> None:
     if not proc or proc.poll() is not None:
         return
     try:
+        emit_event("service.stop.requested", "Stopping process.", service="Suite", source="suite_runtime", fields={"pid": proc.pid})
         proc.terminate()
         proc.wait(timeout=4)
+        emit_event("service.stop.completed", "Process stopped.", service="Suite", source="suite_runtime", fields={"pid": proc.pid})
     except Exception:
         try:
             proc.kill()
+            emit_event("service.stop.killed", "Process killed after terminate failed.", level="WARN", service="Suite", source="suite_runtime", fields={"pid": proc.pid})
         except Exception:
-            pass
+            emit_event("service.stop.failed", "Process could not be stopped.", level="ERROR", service="Suite", source="suite_runtime", fields={"pid": getattr(proc, "pid", None)})
 
 
 def kill_pid(pid: str) -> None:
@@ -694,7 +789,7 @@ def stop_by_saved_pids(include_portal: bool = True) -> None:
 def stop_by_ports(ports: dict[str, str], include_portal: bool = True) -> None:
     if os.name != "nt":
         return
-    target_keys = ["industrial_web_port", "api_studio_port", "opcua_port", "mqtt_broker_port"]
+    target_keys = ["industrial_web_port", "opcua_port", "mqtt_broker_port"]
     if include_portal:
         target_keys.append("portal_port")
     targets = {str(ports[key]) for key in target_keys if key in ports}
@@ -708,14 +803,14 @@ def stop_by_ports(ports: dict[str, str], include_portal: bool = True) -> None:
                 local = parts[1]
                 pid = parts[-1]
                 if ":" in local and local.rsplit(":", 1)[-1] in targets:
-                    log_line(f"Stopping PID {pid} on {local}")
+                    emit_event("service.stop.port_owner", "Stopping process bound to simulator port.", service="Suite", source="suite_runtime", fields={"pid": pid, "endpoint": local})
                     kill_pid(pid)
     except Exception:
         pass
 
 
 def stop_services(ports: dict[str, str], include_portal: bool = True) -> tuple[bool, str]:
-    log_line("Stopping services...")
+    emit_event("suite.stop.requested", "Stopping services.", service="Suite", source="suite_runtime", fields={"include_portal": include_portal, "ports": ports})
     for name, proc in list(processes.items()):
         if not include_portal and name.lower() == "portal":
             continue
@@ -726,7 +821,7 @@ def stop_services(ports: dict[str, str], include_portal: bool = True) -> tuple[b
             pass
     stop_by_saved_pids(include_portal=include_portal)
     stop_by_ports(ports, include_portal=include_portal)
-    log_line("Stop request complete.")
+    emit_event("suite.stop.completed", "Stop request complete.", service="Suite", source="suite_runtime", fields={"include_portal": include_portal})
     return True, "Stop request sent."
 
 
@@ -734,7 +829,6 @@ def urls_for(ports: dict[str, str]) -> dict[str, str]:
     return {
         "portal": f"http://localhost:{ports['portal_port']}",
         "industrial": f"http://localhost:{ports['industrial_web_port']}",
-        "api_studio": f"http://localhost:{ports['api_studio_port']}",
         "opcua": f"opc.tcp://localhost:{ports['opcua_port']}/simulator",
         "mqtt": f"localhost:{ports['mqtt_broker_port']}",
     }
@@ -744,7 +838,6 @@ def status_payload(ports: dict[str, str]) -> dict:
     flags = {}
     for label, key in [
         ("industrial", "industrial_web_port"),
-        ("api_studio", "api_studio_port"),
         ("portal", "portal_port"),
         ("opcua", "opcua_port"),
         ("mqtt", "mqtt_broker_port"),
@@ -756,7 +849,8 @@ def status_payload(ports: dict[str, str]) -> dict:
     return {
         "ports": ports,
         "urls": urls_for(ports),
-        "status": flags,
+        "status": {**flags, "api_studio": False},
+        "api_studio": {"disabled": True},
         "log": tail_log(),
     }
 
@@ -765,9 +859,9 @@ def start_hidden_suite() -> int:
     ports = load_ports()
     conflicts = port_conflicts(ports)
     if conflicts:
-        log_line("Ports already listening: " + "; ".join(conflicts))
+        emit_event("ports.conflict.detected", "Ports already listening.", level="WARN", service="Suite", source="suite_runtime", fields={"conflicts": conflicts})
     ok, msg = start_services(ports, include_portal=True, open_browser_flag=False)
-    log_line(msg)
+    emit_event("suite.hidden_start.result", msg, level="INFO" if ok else "ERROR", service="Suite", source="suite_runtime")
     if ok:
         time.sleep(3)
         open_app_window(f"http://localhost:{ports['portal_port']}")

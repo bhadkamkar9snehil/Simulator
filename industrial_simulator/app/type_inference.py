@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 import re
 
-LABEL_COLUMNS = {"timestamp", "scenario", "operating_state", "phase", "product", "heat_id"}
+LABEL_COLUMNS = {"timestamp", "scenario", "operating_state", "phase", "product", "product_grade", "batch_id", "heat_id"}
 BOOLEAN_SUFFIXES = ("_active", "_alarm", "_fault", "_enabled")
 INT_RE = re.compile(r"^[+-]?\d+$")
 FLOAT_RE = re.compile(r"^[+-]?(\d+\.\d*|\d*\.\d+|\d+)([eE][+-]?\d+)?$")
@@ -58,9 +58,4 @@ def sanitize_tag_name(value: str) -> str:
 
 
 def is_default_disabled_column(column: str) -> bool:
-    name = column.lower()
-    if name in LABEL_COLUMNS:
-        return True
-    if name.endswith(("_active", "_alarm")):
-        return True
     return False

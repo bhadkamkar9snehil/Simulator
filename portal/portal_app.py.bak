@@ -1,0 +1,388 @@
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from suite_runtime import (
+    CREATE_NO_WINDOW as SUITE_CREATE_NO_WINDOW,
+    load_ports as suite_load_ports,
+    save_ports as suite_save_ports,
+    validate_ports as suite_validate_ports,
+    start_services as suite_start_services,
+    stop_services as suite_stop_services,
+    status_payload as suite_status_payload,
+    open_app_window as suite_open_app_window,
+    VENV_PYW as SUITE_VENV_PYW,
+    VENV_PY as SUITE_VENV_PY,
+)
+
+
+def env_port(name: str, default: int, fallback_name: str | None = None) -> int:
+    values = [name]
+    if fallback_name:
+        values.append(fallback_name)
+    for key in values:
+        raw = str(os.environ.get(key, "")).strip()
+        if not raw:
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            continue
+    return default
+
+
+PORT = env_port("PORTAL_PORT", 8001)
+INDUSTRIAL_PORT = env_port("INDUSTRIAL_PORT", 8000, "INDUSTRIAL_WEB_PORT")
+API_STUDIO_PORT = env_port("API_STUDIO_PORT", 5050, "PORT")
+OPCUA_PORT = env_port("OPCUA_PORT", 4840)
+MQTT_BROKER_PORT = env_port("MQTT_BROKER_PORT", 1883, "MQTT_PORT")
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+DATA_DIR = ROOT / "portal" / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONNECTIONS_JSON = DATA_DIR / "connections.json"
+MAPPINGS_JSON = DATA_DIR / "api_source_mappings.json"
+
+
+def local_ip() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+
+def json_response(handler: BaseHTTPRequestHandler, code: int, data: dict) -> None:
+    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header("Content-Length", str(len(raw)))
+    handler.end_headers()
+    handler.wfile.write(raw)
+
+
+def html_response(handler: BaseHTTPRequestHandler, html: str) -> None:
+    raw = html.encode("utf-8")
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(raw)))
+    handler.end_headers()
+    handler.wfile.write(raw)
+
+
+def read_json(handler: BaseHTTPRequestHandler) -> dict:
+    length = int(handler.headers.get("Content-Length") or 0)
+    raw = handler.rfile.read(length).decode("utf-8") if length else "{}"
+    return json.loads(raw or "{}")
+
+
+def read_store(path: Path, default):
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return default
+
+
+def write_store(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def get_service(url: str) -> dict:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            return {"ok": True, "status": r.status}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def mssql_payload(cfg: dict, rows: list[dict] | None = None) -> dict:
+    payload = dict(cfg or {})
+    if rows is not None:
+        payload["rows"] = rows
+    return payload
+
+
+def run_mssql(action: str, cfg: dict, rows: list[dict] | None = None) -> dict:
+    payload = mssql_payload(cfg, rows)
+    payload["action"] = action
+    helper = ROOT / "portal" / "mssql_helper.ps1"
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as f:
+        json.dump(payload, f)
+        payload_path = f.name
+    try:
+        ps = "powershell.exe" if os.name == "nt" else "pwsh"
+        cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helper), payload_path]
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=60, creationflags=CREATE_NO_WINDOW)
+        out = (completed.stdout or "").strip()
+        err = (completed.stderr or "").strip()
+        try:
+            parsed = json.loads(out) if out else {}
+        except Exception:
+            parsed = {"raw": out}
+        parsed["returncode"] = completed.returncode
+        if err:
+            parsed["stderr"] = err
+        if completed.returncode != 0:
+            parsed.setdefault("ok", False)
+        return parsed
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    finally:
+        try:
+            os.unlink(payload_path)
+        except Exception:
+            pass
+
+
+def current_industrial_rows() -> list[dict]:
+    url = f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/replay/current-values"
+    with urllib.request.urlopen(url, timeout=5) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    rows = []
+    for item in data.get("values", []):
+        rows.append({
+            "ts": item.get("last_updated") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "tag_name": item.get("tag_name") or item.get("node_id") or "tag",
+            "value": str(item.get("value", "")),
+            "unit": item.get("data_type", ""),
+            "quality": "Good",
+            "description": item.get("node_id", ""),
+        })
+    return rows
+
+
+def page() -> str:
+    template = r'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulator Suite</title>
+<style>
+:root{--bg:#f5f8fb;--ink:#0b1720;--muted:#5b6b7a;--card:#fff;--line:#d6e2ea;--brand:#0b7f78;--brand2:#0c4a6e;--blue:#2563eb;--ok:#14804a;--bad:#c53030;--dark:#071923;--dark2:#0a1220;--shadow:0 12px 30px rgba(7,25,35,.08)}
+*{box-sizing:border-box}html,body{height:100%;margin:0;overflow:hidden;font-family:Segoe UI,Arial,sans-serif;color:var(--ink);background:var(--bg);font-size:14px}.app{height:100vh;display:grid;grid-template-rows:64px 58px 1fr;gap:0}.mainHeader{margin:12px 16px 0;border:1px solid #111;background:linear-gradient(135deg,#071923,#0b4f5f 60%,#0b7f78);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 18px}.brandTitle{font-size:22px;font-weight:900;letter-spacing:.01em}.brandSub{font-size:12px;color:#d8f7f1;margin-top:3px}.headerPills{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.chip,.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.14);color:#fff;padding:5px 8px;font-size:11px;font-weight:800}.pill{border-color:var(--line);background:#f8fafc;color:#334155}.appTabs{display:flex;gap:10px;align-items:center;padding:12px 16px}.appTabs button{min-width:112px;border:1px solid #111;border-radius:9px;background:#fff;color:#111;font-weight:850;cursor:pointer;padding:10px 14px;box-shadow:none}.appTabs button.active{background:#0b7f78;color:#fff;border-color:#0b7f78}.appMain{min-height:0;overflow:hidden;padding:0 16px 14px}.panel{display:none;height:100%;min-height:0}.panel.active{display:block}.panelScroller{height:100%;overflow:auto;padding:0 0 4px;scrollbar-width:thin}.layoutGenerate{height:100%;display:grid;grid-template-columns:160px 1fr;gap:16px;min-height:0}.leftRail{display:grid;grid-template-rows:minmax(170px,auto) minmax(170px,auto) 1fr;gap:10px;min-height:0}.card{background:var(--card);border:1px solid #111;padding:13px;box-shadow:none;min-width:0}.softCard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px;min-width:0}.card h2,.softCard h2,.softCard h3{margin:0 0 9px}.filesPanel{height:100%;min-height:0;display:grid;grid-template-rows:auto 1fr auto;gap:10px}.tableWrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;min-height:0}.filesPanel .tableWrap{height:100%}.smallPreview{max-height:120px;overflow:auto}.statusBox{background:#071923;color:#d8f7f1;border-radius:10px;padding:12px;white-space:pre-wrap;overflow:auto;font-family:Consolas,monospace;font-size:12px;border:1px solid #183044}.layoutTags{height:100%;display:grid;grid-template-rows:auto auto 1fr;gap:10px;min-height:0}.commonRun{display:grid;grid-template-columns:repeat(6,minmax(90px,1fr)) auto;gap:10px;align-items:end}.protocolTop{display:grid;grid-template-columns:1fr 1fr;gap:10px}.protocolBody{display:grid;grid-template-columns:1fr 1fr;gap:10px;min-height:0}.tagPanel{min-height:0;display:grid;grid-template-rows:auto 1fr}.tagPanel .tableWrap{min-height:0}.apiLayout{height:100%;display:grid;grid-template-columns:150px 1fr;gap:10px;min-height:0}.apiMenu{background:#0b1423;color:#dbeafe;border:1px solid #111;padding:10px;overflow:auto}.apiMenu h3{margin:0 0 10px;color:#fff;font-size:14px}.apiMenu button{display:block;width:100%;text-align:left;background:transparent;color:#cbd5e1;border:0;border-radius:6px;padding:8px 7px;margin:2px 0;cursor:pointer;font-weight:750}.apiMenu button.active,.apiMenu button:hover{background:#172338;color:#fff}.apiStage{background:#071923;border:1px solid #111;min-height:0;overflow:hidden}.subpanel{display:none;height:100%;min-height:0;overflow:auto;padding:10px}.subpanel.active{display:block}.apiFrame{height:100%;width:100%;min-height:520px;border:0;background:#071923;border-radius:4px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:10px}.full{grid-column:1/-1}.half{grid-column:span 6}.third{grid-column:span 4}.twoThird{grid-column:span 8}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.right{justify-content:flex-end}.muted{color:var(--muted);font-size:12px;line-height:1.4}label{display:block;font-size:12px;font-weight:800;color:#334155;margin:7px 0 3px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;color:#0f172a;outline:none}textarea{min-height:95px;font-family:Consolas,monospace}.btn,button.btn{border:1px solid var(--line);background:#fff;color:#0f172a;border-radius:8px;padding:8px 11px;font-weight:850;cursor:pointer;text-decoration:none;display:inline-block}.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.btn.blue{background:var(--blue);border-color:var(--blue);color:#fff}.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}.btn.bad{background:var(--bad);border-color:var(--bad);color:#fff}.btn.small{font-size:12px;padding:5px 7px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}th{background:#f4f8fb;color:#475569;font-size:11px;text-transform:uppercase;position:sticky;top:0;z-index:1}tr:nth-child(even) td{background:#fbfdff}input[type="checkbox"]{width:auto}.controlGrid{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px}.controlBlock{background:#f8fcfe;border:1px solid var(--line);border-radius:12px;padding:12px}.appChromeHint{display:inline-flex;align-items:center;border-radius:999px;background:#e6fffb;border:1px solid #99f6e4;color:#0f766e;padding:5px 8px;font-size:11px;font-weight:850}@media(max-width:1050px){.app{grid-template-rows:auto auto 1fr}.mainHeader{display:block;padding:10px}.layoutGenerate,.apiLayout{grid-template-columns:1fr}.leftRail{grid-template-rows:auto}.commonRun,.protocolTop,.protocolBody,.controlGrid{grid-template-columns:1fr}.half,.third,.twoThird{grid-column:1/-1}.headerPills{justify-content:flex-start;margin-top:8px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="mainHeader">
+ <div><div class="brandTitle">Simulator Suite&nbsp;&nbsp; OPC UA/MQTT/API</div><div class="brandSub">Industrial simulator, API Studio, protocol replay, Excel/MSSQL mapping, and in-app control in one layout.</div></div>
+ <div class="headerPills"><span class="chip">LAN __LAN_IP__</span><span class="chip">Portal __PORT__</span><span class="chip">Industrial __INDUSTRIAL_PORT__</span><span class="chip">API __API_STUDIO_PORT__</span><span class="chip">OPC UA __OPCUA_PORT__</span><span class="chip">MQTT __MQTT_BROKER_PORT__</span><span class="appChromeHint">Application Mode</span></div>
+</header>
+<nav class="appTabs"><button class="active" onclick="showMain('generate',this)">Generate<br>Data</button><button onclick="showMain('tags',this)">Tags</button><button onclick="showMain('api',this)">API</button><div id="topStatus" class="row" style="margin-left:auto"></div></nav>
+<main class="appMain">
+<section id="generate" class="panel active"><div class="layoutGenerate">
+ <aside class="leftRail">
+  <div class="card"><h2>Generate Data</h2><label>Domain</label><select id="genDomain" onchange="loadSpec()"></select><label>Scenario</label><select id="genScenario"></select><label>Output filename</label><input id="genOutput" value="generated_tags.csv"><div id="genParams"></div><div class="row" style="margin-top:10px"><button class="btn primary" onclick="generateData()">Generate</button><button class="btn" onclick="loadFiles()">Refresh</button></div></div>
+  <div class="card"><h2>Select / Upload File</h2><label>CSV/XLSX file</label><input type="file" id="uploadFile" accept=".csv,.xlsx"><div class="row" style="margin-top:10px"><button class="btn primary" onclick="uploadSelectedFile()">Upload</button><button class="btn" onclick="loadFiles()">Refresh</button></div><label>Quick assignment</label><select id="quickProtocol"><option value="shared">Shared file for both</option><option value="opcua">OPC UA only</option><option value="mqtt">MQTT only</option></select><button class="btn" style="margin-top:8px" onclick="assignCheckedFiles()">Assign checked files</button></div>
+  <div class="softCard"><h3>Generate Result</h3><pre id="genResult" class="statusBox smallPreview">No generation yet.</pre></div>
+ </aside>
+ <div class="card filesPanel"><div><h2>Files</h2><div id="fileSummary" class="muted">Loading files...</div></div><div class="tableWrap"><table id="filesTable"></table></div><div class="grid" style="grid-template-columns:1fr 1fr;gap:10px"><div><h3>File Assignment</h3><div class="tableWrap smallPreview"><table id="assignTable"></table></div></div><div><h3>Selected Plan Preview</h3><pre id="planPreview" class="statusBox smallPreview">Select files to build a plan.</pre></div></div></div>
+</div></section>
+<section id="tags" class="panel"><div class="panelScroller"><div class="layoutTags">
+ <div class="softCard commonRun"><div><label>Frequency Hz</label><input id="frequency" value="1"></div><div><label>Loop mode</label><select id="loopMode"><option value="loop_forever">Loop forever</option><option value="once">Once</option><option value="hold_last">Hold last</option><option value="ping_pong">Ping pong</option></select></div><div><label>Timestamp mode</label><select id="timestampMode"><option value="wall_clock">Wall clock</option><option value="csv_timestamp_ignore_rate">CSV timestamp ignore rate</option><option value="relative_from_csv">Relative from CSV</option></select></div><div><label>Start row</label><input id="startRow" value="0"></div><div><label>Max rows</label><input id="maxRows" placeholder="optional"></div><div><label>Both</label><div class="row"><button class="btn blue" onclick="startRun('both')">Start Both</button><button class="btn bad" onclick="stopRun('both')">Stop Both</button></div></div><div><label>Status</label><button class="btn" onclick="loadLive()">Refresh Tags</button></div></div>
+ <div class="protocolTop"><div class="card"><div class="row" style="justify-content:space-between"><h2>OPC UA</h2><div class="row"><button class="btn ok" onclick="startRun('opcua')">Start</button><button class="btn bad" onclick="stopRun('opcua')">Stop</button></div></div><label>Namespace URI</label><input id="namespaceUri" value="http://local/industrial-tag-simulator"><label>Root folder</label><input id="rootFolder" value="TagSimulator"><label>Node ID prefix</label><input id="nodePrefix" value="TagSimulator"><label>Endpoint</label><input value="opc.tcp://localhost:__OPCUA_PORT__/simulator" readonly></div><div class="card"><div class="row" style="justify-content:space-between"><h2>MQTT</h2><div class="row"><button class="btn ok" onclick="startRun('mqtt')">Start</button><button class="btn bad" onclick="stopRun('mqtt')">Stop</button></div></div><label>Host</label><input id="mqttHost" value="localhost"><label>Port</label><input id="mqttPort" value="__MQTT_BROKER_PORT__"><label>Topic prefix</label><input id="mqttTopic" value="industrial-tag-simulator"><div class="row"><label><input id="pubIndividual" type="checkbox" checked> Individual tags</label><label><input id="pubAggregate" type="checkbox" checked> Aggregate</label></div></div></div>
+ <div class="protocolBody"><div class="card tagPanel"><div class="row" style="justify-content:space-between"><h2>OPC UA Tags</h2><span class="muted">Node ID view</span></div><div class="tableWrap"><table id="liveTable"></table></div></div><div class="card tagPanel"><div class="row" style="justify-content:space-between"><h2>MQTT Tags</h2><span class="muted">Topic/value view</span></div><pre id="runResult" class="statusBox" style="height:100%;min-height:320px">Not started.</pre></div></div>
+</div></div></section>
+<section id="api" class="panel"><div class="apiLayout">
+ <aside class="apiMenu"><h3>API Simulator Studio</h3><button class="active" onclick="showSub('studio',this)">API Builder</button><button onclick="showSub('quick',this)">Test Console</button><button onclick="showSub('conn',this)">Connection Setting</button><button onclick="showSub('map',this)">API Source Mapping</button><button onclick="showSub('launcher',this)">Application Control</button><a class="btn blue" style="margin-top:10px;width:100%;text-align:center" href="http://127.0.0.1:__API_STUDIO_PORT__" target="_blank">Open Full API Studio</a></aside>
+ <div class="apiStage">
+  <div id="studio" class="subpanel active"><iframe class="apiFrame" src="http://127.0.0.1:__API_STUDIO_PORT__"></iframe></div>
+  <div id="quick" class="subpanel"><div class="grid"><div class="softCard third"><h2>Reference API Quick Tests</h2><div class="row"><button class="btn" onclick="quickGet('/api/v1/assets')">GET Assets</button><button class="btn" onclick="quickGet('/api/v1/sap/pm/notifications')">GET SAP PM</button><button class="btn" onclick="quickGet('/api/v1/stream/tags')">Open Tag Stream</button></div><label>POST Asset Health JSON</label><textarea id="healthJson">{"assetCode":"EAF_01","healthScore":48,"condition":"CRITICAL"}</textarea><button class="btn primary" onclick="quickPost('/api/v1/asset-health/snapshots', healthJson.value)">POST Health Snapshot</button></div><div class="softCard twoThird"><h2>API Result</h2><pre id="apiResult" class="statusBox">No API test yet.</pre></div></div></div>
+  <div id="conn" class="subpanel"><div class="grid"><div class="softCard third"><h2>Connection Setting</h2><label>Source type</label><select id="sourceType"><option value="mssql">MSSQL SQL Server</option><option value="excel">Excel / CSV file</option><option value="sqlite">SQLite local</option></select><label>Server / IP</label><input id="server" value="localhost"><div class="row"><div style="flex:1"><label>Port</label><input id="dbPort" value="1433"></div><div style="flex:1"><label>Auth</label><select id="auth"><option value="sql">SQL Login</option><option value="windows">Windows Authentication</option></select></div></div><div class="row"><div style="flex:1"><label>Username</label><input id="username" value="sa"></div><div style="flex:1"><label>Password</label><input id="password" type="password"></div></div><div class="row"><label><input id="encrypt" type="checkbox"> Encrypt</label><label><input id="trust" type="checkbox" checked> Trust certificate</label></div></div><div class="softCard third"><h2>DB and Table</h2><label>Database</label><select id="database"><option value="master">master</option></select><div class="row"><button class="btn" onclick="listDatabases()">Load DBs</button><button class="btn primary" onclick="testMssql()">Test DB</button></div><label>Table</label><select id="table"><option value="dbo.tag_snapshots">dbo.tag_snapshots</option></select><div class="row"><button class="btn" onclick="listTables()">Load Tables</button><button class="btn ok" onclick="writeCurrent()">Write Current Values</button></div></div><div class="softCard third"><h2>Excel / CSV Source</h2><label>Excel / CSV file</label><select id="excelFile"></select><label>Source</label><select id="excelSource"><option value="uploaded">uploaded</option><option value="generated">generated</option><option value="sample">sample</option></select><label>Sheet</label><input id="excelSheet" value="active"><button class="btn" onclick="refreshExcelFiles()">Refresh Excel/CSV Files</button></div><div class="softCard full"><h3>Connection Result</h3><pre id="connResult" class="statusBox">No connection action yet.</pre></div></div></div>
+  <div id="map" class="subpanel"><div class="grid"><div class="softCard third"><h2>Each API Own Table or Excel</h2><label>API Endpoint</label><select id="apiEndpoint"></select><label>Data source</label><select id="apiSource"><option value="mssql">MSSQL table</option><option value="excel">Excel / CSV file</option><option value="sqlite">API Studio internal datastore</option></select><label>Database</label><select id="mapDatabase"></select><label>Table</label><select id="mapTable"></select><label>Excel / CSV File</label><select id="mapExcel"></select><label>Sheet</label><input id="mapSheet" value="active"><button class="btn primary" onclick="saveMapping()">Save Mapping for API</button></div><div class="softCard twoThird"><h2>Saved API Source Mappings</h2><div class="tableWrap"><table id="mappingTable"></table></div></div></div></div>
+  <div id="launcher" class="subpanel"><div class="grid"><div class="softCard full"><div class="row" style="justify-content:space-between"><div><h2>Application Control + Port Selection</h2><p class="muted">Services run hidden in background. Required packages install automatically from bundled wheels when missing.</p></div><div id="launcherInlineStatus" class="row"></div></div><div class="controlGrid"><div class="controlBlock"><h3>Port Selection</h3><label>Industrial web UI</label><input id="launcherIndustrialPort" value="8000"><label>API Studio</label><input id="launcherApiPort" value="5050"><label>Top-tab portal</label><input id="launcherPortalPort" value="8001"><label>OPC UA server</label><input id="launcherOpcuaPort" value="4840"><label>MQTT broker/client</label><input id="launcherMqttPort" value="1883"></div><div class="controlBlock"><h3>Actions</h3><div class="row"><button class="btn primary" onclick="launcherStart()">Start Services Hidden</button><button class="btn bad" onclick="launcherStopAll()">Stop All</button></div><div class="row" style="margin-top:8px"><button class="btn" onclick="launcherSave()">Save Ports</button><button class="btn" onclick="loadLauncher()">Refresh Status</button></div><div class="row" style="margin-top:8px"><button class="btn blue" onclick="launcherOpenApp()">Open App Window</button><a id="launcherOpenPortal" class="btn" href="#">Open Portal</a><a id="launcherOpenApi" class="btn" href="#" target="_blank">Open API Studio</a></div></div><div class="controlBlock"><h3>Service Status + URLs</h3><pre id="launcherUrls" class="statusBox" style="max-height:230px">Loading...</pre></div></div></div><div class="softCard half"><h3>Launcher Result</h3><pre id="launcherResult" class="statusBox">No launcher action yet.</pre></div><div class="softCard half"><h3>Launcher Log</h3><pre id="launcherLog" class="statusBox">Loading launcher log...</pre></div></div></div>
+ </div>
+</div></section>
+</main></div>
+<script>
+const INDUSTRIAL='http://127.0.0.1:__INDUSTRIAL_PORT__';
+const API='http://127.0.0.1:__API_STUDIO_PORT__';
+let files=[], generators=[], spec=null, endpoints=[], mappings=[];
+function qs(id){return document.getElementById(id)}
+function showMain(id,btn){document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));qs(id).classList.add('active');document.querySelectorAll('.appTabs button').forEach(x=>x.classList.remove('active'));btn.classList.add('active')}
+function showSub(id,btn){document.querySelectorAll('.subpanel').forEach(x=>x.classList.remove('active'));qs(id).classList.add('active');document.querySelectorAll('.apiMenu button').forEach(x=>x.classList.remove('active'));btn.classList.add('active')}
+async function getJson(url){const r=await fetch(url); return await r.json()}
+async function postJson(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); return await r.json()}
+function pretty(x){return JSON.stringify(x,null,2)}
+function safe(s){return String(s??'').replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]))}
+async function loadStatus(){try{const s=await getJson('/suite/status'); topStatus.innerHTML='<span class="pill">Portal OK</span><span class="pill">Industrial '+(s.industrial.ok?'OK':'OFF')+'</span><span class="pill">API Studio '+(s.api_studio.ok?'OK':'OFF')+'</span>'; const st=await getJson(INDUSTRIAL+'/api/status'); runResult.textContent=pretty(st); }catch(e){topStatus.innerHTML='<span class="pill">Status loading</span>'}}
+async function loadGenerators(){try{const data=await getJson(INDUSTRIAL+'/api/generators'); generators=data.generators||[]; genDomain.innerHTML=generators.map(g=>`<option value="${g.domain_id}">${safe(g.display_name)}</option>`).join(''); await loadSpec()}catch(e){genResult.textContent='Could not load generators: '+e.message}}
+async function loadSpec(){try{const id=genDomain.value;if(!id)return; spec=await getJson(INDUSTRIAL+'/api/generators/'+id+'/spec'); genScenario.innerHTML=(spec.scenarios||[]).map(s=>`<option value="${s.id}">${safe(s.label)}</option>`).join(''); if(spec.default_output_filename) genOutput.value=spec.default_output_filename; genParams.innerHTML=(spec.parameters||[]).map(p=>`<label>${safe(p.label||p.name)}${p.unit?' ('+safe(p.unit)+')':''}</label>${paramInput(p)}`).join('')}catch(e){genResult.textContent='Could not load spec: '+e.message}}
+function paramInput(p){const v=p.default??''; if(p.type==='select' && p.options){return `<select data-param="${p.name}">${p.options.map(o=>`<option value="${o}" ${String(o)===String(v)?'selected':''}>${safe(o)}</option>`).join('')}</select>`} return `<input data-param="${p.name}" value="${safe(v)}" type="${p.type==='number'?'number':'text'}">`}
+async function generateData(){try{const params={};document.querySelectorAll('[data-param]').forEach(el=>params[el.dataset.param]=el.value); const body={scenario:genScenario.value,output_filename:genOutput.value,parameters:params,load_into_replay:true}; const res=await postJson(INDUSTRIAL+'/api/generators/'+genDomain.value+'/generate',body); genResult.textContent=pretty(res); await loadFiles()}catch(e){genResult.textContent='Generate failed: '+e.message}}
+async function uploadSelectedFile(){const f=uploadFile.files[0]; if(!f){alert('Choose a CSV or XLSX file first.');return} const fd=new FormData(); fd.append('file',f); const r=await fetch(INDUSTRIAL+'/api/csv/upload',{method:'POST',body:fd}); const j=await r.json(); planPreview.textContent=pretty(j); await loadFiles()}
+async function loadFiles(){try{const data=await getJson(INDUSTRIAL+'/api/csv/files'); files=data.files||[]; fileSummary.textContent=`${files.length} files loaded`; renderFiles(); refreshExcelFiles()}catch(e){fileSummary.textContent='Could not load files: '+e.message}}
+function fileKey(f){return (f.source+'__'+f.filename).replace(/[^A-Za-z0-9_]/g,'_')}
+function renderFiles(){const rows=files.map(f=>`<tr><td>${safe(f.filename)}</td><td>${safe(f.source)}</td><td>${f.row_count}</td><td>${f.column_count}</td><td><label><input type="checkbox" class="filePick" data-key="${fileKey(f)}"> use</label></td><td><label><input type="checkbox" class="shared" data-key="${fileKey(f)}"> Shared</label></td><td><label><input type="checkbox" class="opcua" data-key="${fileKey(f)}"> OPC UA</label></td><td><label><input type="checkbox" class="mqtt" data-key="${fileKey(f)}"> MQTT</label></td><td><button class="btn small" onclick="previewFile('${f.source}','${f.filename.replace(/'/g,"\\'")}')">Preview</button></td></tr>`).join(''); const head='<tr><th>File</th><th>Source</th><th>Rows</th><th>Cols</th><th>Pick</th><th>Shared</th><th>OPC UA</th><th>MQTT</th><th>Preview</th></tr>'; filesTable.innerHTML=head+rows; assignTable.innerHTML=head+rows; updatePlanPreview()}
+async function previewFile(source,filename){const data=await getJson(INDUSTRIAL+`/api/csv/files/${encodeURIComponent(filename)}/metadata?source=${source}`); planPreview.textContent=pretty(data)}
+function assignCheckedFiles(){const mode=quickProtocol.value; document.querySelectorAll('.filePick:checked').forEach(p=>{const key=p.dataset.key; ['shared','opcua','mqtt'].forEach(cls=>document.querySelectorAll('.'+cls+'[data-key="'+key+'"]').forEach(c=>c.checked=(cls===mode)))}); updatePlanPreview()}
+document.addEventListener('change',e=>{if(e.target.matches('.shared,.opcua,.mqtt,.filePick')) updatePlanPreview()})
+function selectedFiles(cls){const keys=[...document.querySelectorAll('.'+cls+':checked')].map(x=>x.dataset.key); return files.filter(f=>keys.includes(fileKey(f))).map(f=>({filename:f.filename,source:f.source}))}
+function updatePlanPreview(){const plan={shared:selectedFiles('shared'),opcua:selectedFiles('opcua'),mqtt:selectedFiles('mqtt')}; planPreview.textContent=pretty(plan); return plan}
+function replayConfig(protocol){const p=updatePlanPreview(); return {protocol:protocol,files:p.shared,opcua_files:p.opcua,mqtt_files:p.mqtt,frequency_hz:parseFloat(frequency.value||'1'),loop_mode:loopMode.value,timestamp_mode:timestampMode.value,start_row:parseInt(startRow.value||'0'),max_rows:maxRows.value?parseInt(maxRows.value):null,namespace_uri:namespaceUri.value,root_folder:rootFolder.value,node_id_prefix:nodePrefix.value,mqtt_host:mqttHost.value,mqtt_port:parseInt(mqttPort.value||'1883'),mqtt_topic_prefix:mqttTopic.value,mqtt_client_id:'industrial-tag-simulator',mqtt_qos:0,mqtt_retain:false,publish_individual_tags:pubIndividual.checked,publish_aggregate:pubAggregate.checked,tag_selections:[]}}
+async function startRun(protocol){try{let cfg=replayConfig(protocol); if(protocol==='opcua' && !cfg.files.length && !cfg.opcua_files.length) throw new Error('Select at least one shared or OPC UA file.'); if(protocol==='mqtt' && !cfg.files.length && !cfg.mqtt_files.length) throw new Error('Select at least one shared or MQTT file.'); if(protocol==='both' && !cfg.files.length && (!cfg.opcua_files.length || !cfg.mqtt_files.length)) { if(!cfg.files.length) throw new Error('For Both, select shared file(s), or select OPC UA file(s) and MQTT file(s).') } const conf=await postJson(INDUSTRIAL+'/api/replay/configure-files',cfg); const start=await postJson(INDUSTRIAL+'/api/replay/start-'+protocol,{}); runResult.textContent=pretty({configured:conf,start:start})}catch(e){runResult.textContent='Start failed: '+e.message}}
+async function stopRun(protocol){try{const res=await postJson(INDUSTRIAL+'/api/replay/stop-'+protocol,{}); runResult.textContent=pretty(res)}catch(e){runResult.textContent='Stop failed: '+e.message}}
+async function loadLive(){try{const d=await getJson(INDUSTRIAL+'/api/replay/current-values'); const rows=(d.values||[]).map(v=>`<tr><td>${safe(v.tag_name)}</td><td>${safe(v.value)}</td><td>${safe(v.data_type)}</td><td>${safe(v.node_id)}</td><td>${safe(v.last_updated)}</td></tr>`).join(''); liveTable.innerHTML='<tr><th>Tag</th><th>Value</th><th>Type</th><th>Node ID</th><th>Updated</th></tr>'+rows}catch(e){}}
+function dbCfg(){return {server:server.value,port:dbPort.value,database:database.value,auth:auth.value,username:username.value,password:password.value,table:table.value,encrypt:encrypt.checked,trust_server_certificate:trust.checked}}
+function showConn(x){connResult.textContent=pretty(x)}
+async function testMssql(){showConn(await postJson('/mssql/test',dbCfg()))}
+async function writeCurrent(){showConn(await postJson('/mssql/write-current',dbCfg()))}
+async function listDatabases(){const res=await postJson('/mssql/list-databases',dbCfg()); showConn(res); if(res.databases){database.innerHTML=res.databases.map(x=>`<option value="${safe(x)}">${safe(x)}</option>`).join(''); mapDatabase.innerHTML=database.innerHTML}}
+async function listTables(){const res=await postJson('/mssql/list-tables',dbCfg()); showConn(res); if(res.tables){table.innerHTML=res.tables.map(x=>`<option value="${safe(x)}">${safe(x)}</option>`).join(''); mapTable.innerHTML=table.innerHTML}}
+async function refreshExcelFiles(){const opts=files.map(f=>`<option value="${safe(f.source+'|'+f.filename)}">${safe(f.source+' / '+f.filename)}</option>`).join(''); excelFile.innerHTML=opts; mapExcel.innerHTML=opts}
+async function loadApiEndpoints(){try{const data=await getJson(API+'/api/studio/endpoints'); endpoints=data.data||[]; apiEndpoint.innerHTML=endpoints.map(e=>`<option value="${e.id}">${safe(e.method+' '+e.path+' - '+e.name)}</option>`).join(''); await loadMappings()}catch(e){apiResult.textContent='Could not load API Studio endpoints: '+e.message}}
+async function loadMappings(){const res=await getJson('/api-mappings'); mappings=res.mappings||[]; renderMappings()}
+async function saveMapping(){const ep=endpoints.find(e=>e.id===apiEndpoint.value)||{}; const m={endpoint_id:apiEndpoint.value,endpoint_name:ep.name||'',method:ep.method||'',path:ep.path||'',source_type:apiSource.value,database:mapDatabase.value,table:mapTable.value,excel:mapExcel.value,sheet:mapSheet.value,updated_at:new Date().toISOString()}; const res=await postJson('/api-mappings/save',m); mappings=res.mappings||[]; renderMappings()}
+function renderMappings(){mappingTable.innerHTML='<tr><th>API</th><th>Method</th><th>Path</th><th>Source</th><th>DB/Table</th><th>Excel</th><th>Sheet</th></tr>'+mappings.map(m=>`<tr><td>${safe(m.endpoint_name)}</td><td>${safe(m.method)}</td><td>${safe(m.path)}</td><td>${safe(m.source_type)}</td><td>${safe((m.database||'')+' / '+(m.table||''))}</td><td>${safe(m.excel||'')}</td><td>${safe(m.sheet||'')}</td></tr>`).join('')}
+async function quickGet(path){if(path.includes('stream')){window.open(API+path,'_blank');return} const res=await getJson(API+path); apiResult.textContent=pretty(res)}
+async function quickPost(path,bodyText){let body={}; try{body=JSON.parse(bodyText)}catch(e){apiResult.textContent='Invalid JSON: '+e.message; return} const res=await postJson(API+path,body); apiResult.textContent=pretty(res)}
+function launcherPorts(){return {industrial_web_port:launcherIndustrialPort.value.trim(),api_studio_port:launcherApiPort.value.trim(),portal_port:launcherPortalPort.value.trim(),opcua_port:launcherOpcuaPort.value.trim(),mqtt_broker_port:launcherMqttPort.value.trim()}}
+function launcherStatusBadges(status){return Object.entries(status||{}).map(([k,v])=>`<span class="pill">${safe(k)}: <strong style="margin-left:6px;color:${v?'#14804a':'#c53030'}">${v?'ON':'OFF'}</strong></span>`).join('')}
+function launcherUrlsText(data){const u=data.urls||{}; return `Portal:               ${u.portal||''}\nIndustrial simulator: ${u.industrial||''}\nAPI Studio:           ${u.api_studio||''}\nOPC UA endpoint:      ${u.opcua||''}\nMQTT broker/client:   ${u.mqtt||''}` }
+function applyLauncher(data){const p=data.ports||{}; launcherIndustrialPort.value=p.industrial_web_port||launcherIndustrialPort.value; launcherApiPort.value=p.api_studio_port||launcherApiPort.value; launcherPortalPort.value=p.portal_port||launcherPortalPort.value; launcherOpcuaPort.value=p.opcua_port||launcherOpcuaPort.value; launcherMqttPort.value=p.mqtt_broker_port||launcherMqttPort.value; launcherInlineStatus.innerHTML=launcherStatusBadges(data.status||{}); launcherUrls.textContent=launcherUrlsText(data); launcherLog.textContent=data.log||'No launcher log yet.'; if(data.urls){launcherOpenPortal.href=data.urls.portal||'#'; launcherOpenApi.href=data.urls.api_studio||'#';}}
+async function loadLauncher(){try{const data=await getJson('/launcher/config'); applyLauncher(data)}catch(e){launcherResult.textContent='Could not load launcher settings: '+e.message}}
+async function launcherSave(){try{const res=await postJson('/launcher/save',{ports:launcherPorts()}); launcherResult.textContent=pretty(res); applyLauncher(res)}catch(e){launcherResult.textContent='Save failed: '+e.message}}
+async function launcherStart(){try{const res=await postJson('/launcher/start',{ports:launcherPorts(),include_portal:false}); launcherResult.textContent=pretty(res); applyLauncher(res); setTimeout(loadStatus,1200)}catch(e){launcherResult.textContent='Start failed: '+e.message}}
+async function launcherOpenApp(){try{const res=await postJson('/launcher/open-app',{ports:launcherPorts()}); launcherResult.textContent=pretty(res); applyLauncher(res)}catch(e){launcherResult.textContent='Open app failed: '+e.message}}
+async function launcherStopAll(){if(!confirm('Stop all services?')) return; try{const res=await postJson('/launcher/stop',{ports:launcherPorts(),include_portal:false}); launcherResult.textContent=pretty(res); applyLauncher(res); setTimeout(loadStatus,1200)}catch(e){launcherResult.textContent='Stop failed: '+e.message}}
+loadLauncher(); loadStatus(); loadGenerators(); loadFiles(); loadApiEndpoints(); setInterval(loadStatus,4000); setInterval(loadLive,1000); setInterval(loadLauncher,5000);
+</script>
+</body></html>'''
+    replacements = {
+        "__LAN_IP__": local_ip(),
+        "__PORT__": str(PORT),
+        "__INDUSTRIAL_PORT__": str(INDUSTRIAL_PORT),
+        "__API_STUDIO_PORT__": str(API_STUDIO_PORT),
+        "__OPCUA_PORT__": str(OPCUA_PORT),
+        "__MQTT_BROKER_PORT__": str(MQTT_BROKER_PORT),
+    }
+    for key, val in replacements.items():
+        template = template.replace(key, val)
+    return template
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            return html_response(self, page())
+        if path == "/suite/status":
+            return json_response(self, 200, {
+                "portal": {"ok": True, "port": PORT},
+                "industrial": get_service(f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/health"),
+                "api_studio": get_service(f"http://127.0.0.1:{API_STUDIO_PORT}/api/studio/health"),
+            })
+        if path == "/launcher/config":
+            return json_response(self, 200, suite_status_payload(suite_load_ports()))
+        if path == "/connections":
+            return json_response(self, 200, {"connections": read_store(CONNECTIONS_JSON, {})})
+        if path == "/api-mappings":
+            return json_response(self, 200, {"mappings": read_store(MAPPINGS_JSON, [])})
+        return json_response(self, 404, {"ok": False, "error": "Not found"})
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            body = read_json(self)
+            if path == "/launcher/save":
+                ports = body.get("ports") or suite_load_ports()
+                errors = suite_validate_ports(ports)
+                if errors:
+                    payload = suite_status_payload(suite_load_ports())
+                    payload.update({"ok": False, "message": "; ".join(errors)})
+                    return json_response(self, 200, payload)
+                suite_save_ports(ports)
+                payload = suite_status_payload(ports)
+                payload.update({"ok": True, "message": "Ports saved."})
+                return json_response(self, 200, payload)
+            if path == "/launcher/start":
+                ports = body.get("ports") or suite_load_ports()
+                include_portal = bool(body.get("include_portal", False))
+                ok, msg = suite_start_services(ports, include_portal=include_portal, open_browser_flag=False)
+                payload = suite_status_payload(ports)
+                payload.update({"ok": ok, "message": msg})
+                return json_response(self, 200, payload)
+            if path == "/launcher/open-app":
+                ports = body.get("ports") or suite_load_ports()
+                suite_save_ports(ports)
+                ok = suite_open_app_window(f"http://localhost:{ports['portal_port']}")
+                payload = suite_status_payload(ports)
+                payload.update({"ok": True, "message": "Application window requested." if ok else "Default browser opened because Edge/Chrome app mode was not found."})
+                return json_response(self, 200, payload)
+            if path == "/launcher/stop":
+                ports = body.get("ports") or suite_load_ports()
+                include_portal = bool(body.get("include_portal", False))
+                if include_portal:
+                    helper_py = str(SUITE_VENV_PYW if SUITE_VENV_PYW.exists() else SUITE_VENV_PY)
+                    subprocess.Popen([helper_py, str(ROOT / "stop_hidden.py")], cwd=str(ROOT), creationflags=CREATE_NO_WINDOW)
+                    payload = suite_status_payload(ports)
+                    payload.update({"ok": True, "message": "Full stop requested. Portal may close."})
+                    return json_response(self, 200, payload)
+                ok, msg = suite_stop_services(ports, include_portal=False)
+                payload = suite_status_payload(ports)
+                payload.update({"ok": ok, "message": msg})
+                return json_response(self, 200, payload)
+            if path == "/mssql/test":
+                return json_response(self, 200, run_mssql("test", body))
+            if path == "/mssql/write-current":
+                rows = current_industrial_rows()
+                if not rows:
+                    return json_response(self, 200, {"ok": False, "error": "No current values. Configure and start replay first."})
+                return json_response(self, 200, run_mssql("write", body, rows))
+            if path == "/mssql/list-databases":
+                return json_response(self, 200, run_mssql("list_databases", body))
+            if path == "/mssql/list-tables":
+                return json_response(self, 200, run_mssql("list_tables", body))
+            if path == "/connections/save":
+                write_store(CONNECTIONS_JSON, body)
+                return json_response(self, 200, {"ok": True, "connections": body})
+            if path == "/api-mappings/save":
+                mappings = read_store(MAPPINGS_JSON, [])
+                mappings = [m for m in mappings if m.get("endpoint_id") != body.get("endpoint_id")]
+                mappings.append(body)
+                write_store(MAPPINGS_JSON, mappings)
+                return json_response(self, 200, {"ok": True, "mappings": mappings})
+            return json_response(self, 404, {"ok": False, "error": "Not found"})
+        except Exception as exc:
+            return json_response(self, 500, {"ok": False, "error": str(exc)})
+
+
+def main() -> None:
+    print(f"Portal: http://127.0.0.1:{PORT}")
+    print(f"Industrial simulator: http://127.0.0.1:{INDUSTRIAL_PORT}")
+    print(f"API Studio: http://127.0.0.1:{API_STUDIO_PORT}")
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,127 @@
+{
+  "info": {
+    "name": "CSV-backed SAP API Simulator",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:4000"
+    }
+  ],
+  "item": [
+    {
+      "name": "Service Catalog",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/"
+      }
+    },
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "Datasets",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/datasets"
+      }
+    },
+    {
+      "name": "Product Standard Cost",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_PRODUCT_COST_SRV/A_ProductStdCostEstmt"
+      }
+    },
+    {
+      "name": "Single Product Standard Cost",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_PRODUCT_COST_SRV/A_ProductStdCostEstmt('FG-UREA')"
+      }
+    },
+    {
+      "name": "Cost Components",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_PRODUCT_COST_SRV/A_CostCompItmCostEstmt"
+      }
+    },
+    {
+      "name": "Pricing",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_SLSPRICING_SRV/A_PricingConditionRecord"
+      }
+    },
+    {
+      "name": "Contribution Margin Filtered",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/ZGNFC_CONTRIB_MARGIN_SRV/A_ContributionMargin?$filter=Product eq 'FG-UREA'"
+      }
+    },
+    {
+      "name": "Production Orders",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_PRODUCTION_ORDER_2_SRV/A_ProductionOrder"
+      }
+    },
+    {
+      "name": "Confirmed Yield",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_PRODUCTION_ORDER_2_SRV/A_ProdOrderConfirmedYield"
+      }
+    },
+    {
+      "name": "Production Variance",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/ZGNFC_PROD_VARIANCE_SRV/A_ProductionVariance"
+      }
+    },
+    {
+      "name": "Equipment",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_EQUIPMENT_SRV/A_Equipment"
+      }
+    },
+    {
+      "name": "Maintenance Notifications",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_MAINTNOTIFICATION_SRV/A_MaintenanceNotification"
+      }
+    },
+    {
+      "name": "Maintenance Orders",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_MAINTENANCEORDER_SRV/A_MaintenanceOrder"
+      }
+    },
+    {
+      "name": "Equipment Reliability",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/ZGNFC_EQUIP_RELIABILITY_SRV/A_EquipmentReliability"
+      }
+    },
+    {
+      "name": "Simulated SAP Error",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/sap/opu/odata/sap/API_PRODUCT_COST_SRV/A_ProductStdCostEstmt?simulate_error=true"
+      }
+    }
+  ]
+}
+

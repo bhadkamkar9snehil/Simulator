@@ -19,7 +19,8 @@ def generate_csv(domain_id: str, request: GenerateRequest) -> GenerateResponse:
         raise ValueError("Duration and sample rate must be positive.")
     if duration * 60 * rate > MAX_ROWS:
         raise ValueError(f"Generated row count exceeds maximum of {MAX_ROWS}.")
-    rows = generator.generate(request)
+    iter_rows = getattr(generator, "iter_rows", None)
+    rows = iter_rows(request) if callable(iter_rows) else generator.generate(request)
     csv_manager.write_rows(safe, rows, source="generated")
     meta = csv_manager.metadata(safe, "generated")
     return GenerateResponse(

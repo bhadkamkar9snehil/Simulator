@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from app.models import GenerateRequest, GeneratorSpec, ParameterSpec, ScenarioSpec
-from .base import DomainGenerator
+from .base import DomainGenerator, historian_datetime_text
 
 SCENARIOS = [
     ScenarioSpec(id="base_load", label="Base Load"),
@@ -111,7 +111,7 @@ class PowerPlantGenerator(DomainGenerator):
                 drum_level = lag(drum_level, 0.0 + 5*math.sin(elapsed/60), 0.05 * dt)
 
             rows.append({
-                "timestamp": ts.isoformat().replace("+00:00", "Z"),
+                "timestamp": historian_datetime_text(ts),
                 "scenario": request.scenario,
                 "operating_state": state,
                 "active_power_mw": round(mw_out + rng.gauss(0, capacity*0.005), 2),
