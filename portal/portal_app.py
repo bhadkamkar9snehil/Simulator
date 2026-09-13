@@ -13,9 +13,12 @@ from typing import Any
 from fastapi import Body, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent.parent
 INDUSTRIAL_ROOT = ROOT / "industrial_simulator"
+PORTAL_ROOT = ROOT / "portal"
+UI_ROOT = PORTAL_ROOT / "ui"
 for path in (ROOT, INDUSTRIAL_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
@@ -52,18 +55,18 @@ def env_port(name: str, default: int, fallback_name: str | None = None) -> int:
 
 PORT = env_port("PORTAL_PORT", 8001)
 INDUSTRIAL_PORT = env_port("INDUSTRIAL_PORT", 8000, "INDUSTRIAL_WEB_PORT")
-# Compatibility only while launcher port persistence is migrated. API Studio
-# itself has been retired and is not started or packaged.
+# Compatibility only for the legacy page while launcher port persistence is
+# migrated. API Studio itself is retired and is not started or packaged.
 API_STUDIO_PORT = env_port("API_STUDIO_PORT", 5050, "PORT")
 OPCUA_PORT = env_port("OPCUA_PORT", 4840)
 MQTT_BROKER_PORT = env_port("MQTT_BROKER_PORT", 1883, "MQTT_PORT")
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-DATA_DIR = ROOT / "portal" / "data"
+DATA_DIR = PORTAL_ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONNECTIONS_JSON = DATA_DIR / "connections.json"
 MAPPINGS_JSON = DATA_DIR / "api_source_mappings.json"
 
-app = FastAPI(title="Simulator Portal", version="3.0.0")
+app = FastAPI(title="Simulator Portal", version="3.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -71,6 +74,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
+app.mount("/ui", StaticFiles(directory=str(UI_ROOT)), name="ui")
 
 
 def local_ip() -> str:
@@ -121,24 +125,37 @@ def current_industrial_rows() -> list[dict[str, Any]]:
     ]
 
 
-def page() -> str:
-    template = (ROOT / "portal" / "simulator_ui.html").read_text(encoding="utf-8")
-    config = {
+def launcher_config() -> dict[str, Any]:
+    return {
         "industrial_web_port": INDUSTRIAL_PORT,
-        "api_studio_port": API_STUDIO_PORT,
         "portal_port": PORT,
         "opcua_port": OPCUA_PORT,
         "mqtt_port": MQTT_BROKER_PORT,
         "mqtt_host": "localhost",
         "lan_ip": local_ip(),
     }
+
+
+def inject_launcher_config(template: str, config: dict[str, Any]) -> str:
     assignment = f"window.SIMULATOR_LAUNCHER_CONFIG = {json.dumps(config)};"
     placeholder = "window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};"
     if placeholder in template:
-        template = template.replace(placeholder, assignment, 1)
-    else:
-        template = template.replace("<body>", f"<body>\n<script>{assignment}</script>", 1)
+        return template.replace(placeholder, assignment, 1)
+    return template.replace("<body>", f"<body>\n<script>{assignment}</script>", 1)
 
+
+def page() -> str:
+    template = (UI_ROOT / "index.html").read_text(encoding="utf-8")
+    return inject_launcher_config(template, launcher_config())
+
+
+def legacy_page() -> str:
+    template = (PORTAL_ROOT / "simulator_ui.html").read_text(encoding="utf-8")
+    config = {
+        **launcher_config(),
+        "api_studio_port": API_STUDIO_PORT,
+    }
+    template = inject_launcher_config(template, config)
     replacements = {
         'id="lpPortal" value="8001"': f'id="lpPortal" value="{PORT}"',
         'id="lpIndustrial" value="8000"': f'id="lpIndustrial" value="{INDUSTRIAL_PORT}"',
@@ -163,6 +180,11 @@ def index() -> str:
     return page()
 
 
+@app.get("/legacy", response_class=HTMLResponse)
+def legacy() -> str:
+    return legacy_page()
+
+
 @app.get("/suite/status")
 def suite_status() -> dict[str, Any]:
     return {
@@ -173,7 +195,7 @@ def suite_status() -> dict[str, Any]:
 
 
 @app.get("/launcher/config")
-def launcher_config() -> dict[str, Any]:
+def launcher_status() -> dict[str, Any]:
     return suite_status_payload(suite_load_ports())
 
 
