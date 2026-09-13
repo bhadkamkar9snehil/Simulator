@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
-import logging
 import time
 from pathlib import Path
+
 from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from app.csv_manager import ensure_dirs as ensure_csv_dirs
+from fastapi.staticfiles import StaticFiles
+
 from app.config_store import ensure_dir as ensure_config_dir
+from app.csv_manager import ensure_dirs as ensure_csv_dirs
+
 
 def get_base_dir() -> Path:
     if os.environ.get("ITS_BASE_DIR"):
@@ -18,6 +21,7 @@ def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
 
 ROOT = get_base_dir()
 FRONTEND = ROOT / "frontend"
@@ -27,14 +31,17 @@ if str(SUITE_ROOT) not in sys.path:
 
 from industrial_logging import configure_python_logging, emit_event  # noqa: E402
 from app.api import router, simulator  # noqa: E402
+from app.simulation.api import router as simulation_router  # noqa: E402
+from app.simulation.runtime import simulation_manager  # noqa: E402
 from app.source_simulators.router import sap_odata_router, source_api_router  # noqa: E402
 
 configure_python_logging(service="Industrial", source="python")
 logger = logging.getLogger("industrial.api")
 
-app = FastAPI(title="Industrial Dual Protocol Tag Simulator", version="2.0.0")
+app = FastAPI(title="Unified Industrial Simulator", version="3.0.0-alpha.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
+app.include_router(simulation_router)
 app.include_router(source_api_router)
 app.include_router(sap_odata_router)
 app.mount("/static", StaticFiles(directory=str(FRONTEND)), name="static")
@@ -75,6 +82,7 @@ async def startup() -> None:
 @app.on_event("shutdown")
 async def shutdown() -> None:
     emit_event("industrial.shutdown", "Industrial backend shutdown.", service="Industrial", source="lifecycle")
+    await simulation_manager.shutdown()
     await simulator.stop()
 
 
