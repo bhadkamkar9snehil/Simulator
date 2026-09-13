@@ -518,6 +518,10 @@ def create_target(binding: TargetBinding, hosts: InterfaceHostManager) -> Simula
         return MqttTarget(binding)
     if binding.kind in {"sql", "sql_server", "mssql"}:
         return SqlServerTarget(binding)
+    if binding.kind in {"odata", "sap_odata"}:
+        from .odata import ODataTarget
+
+        return ODataTarget(binding)
     if binding.kind in {"http", "http_stream"}:
         return HttpTarget(binding)
     if binding.kind in {"memory", "internal"}:
