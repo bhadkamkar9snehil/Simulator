@@ -34,6 +34,35 @@ class SignalDefinition(BaseModel):
     writable: bool = False
 
 
+class SignalMapping(BaseModel):
+    source: str
+    target: str | None = None
+    node_id: str | None = None
+    enabled: bool = True
+    data_type: DataType | None = None
+    unit: str | None = None
+    quality: str | None = None
+    scale: float = 1.0
+    offset: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("source")
+    @classmethod
+    def source_required(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Signal mapping source is required.")
+        return value
+
+    @field_validator("target", "node_id")
+    @classmethod
+    def empty_optional_text_is_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
 class SimulationFrame(BaseModel):
     simulation_id: str
     sequence: int = Field(default=0, ge=0)
@@ -87,6 +116,8 @@ class SimulationDefinition(BaseModel):
     simulation_id: str = Field(default_factory=lambda: _new_id("sim"), pattern=r"^[A-Za-z0-9_.-]+$")
     name: str = "Simulation"
     source: SourceBinding
+    mappings: list[SignalMapping] = Field(default_factory=list)
+    drop_unmapped_signals: bool = False
     clock: ClockSpec = Field(default_factory=ClockSpec)
     loop_mode: Literal["once", "loop_forever", "hold_last", "ping_pong"] = "loop_forever"
     targets: list[TargetBinding] = Field(default_factory=list)
@@ -95,13 +126,16 @@ class SimulationDefinition(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_targets(self) -> "SimulationDefinition":
+    def validate_targets_and_mappings(self) -> "SimulationDefinition":
         enabled = [target for target in self.targets if target.enabled]
         if not enabled:
             raise ValueError("At least one enabled target is required.")
         target_ids = [target.target_id for target in self.targets]
         if len(target_ids) != len(set(target_ids)):
             raise ValueError("Target ids must be unique within a simulation.")
+        mapped_targets = [mapping.target or mapping.source for mapping in self.mappings if mapping.enabled]
+        if len(mapped_targets) != len(set(mapped_targets)):
+            raise ValueError("Enabled signal mappings must produce unique target names.")
         return self
 
 
