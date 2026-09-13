@@ -22,6 +22,12 @@ REQUIRED_FILES = {
     "runtime/runtime_manifest.json",
     "portal/portal_app.py",
     "portal/simulator_ui.html",
+    "portal/ui/index.html",
+    "portal/ui/styles.css",
+    "portal/ui/api.js",
+    "portal/ui/model.js",
+    "portal/ui/render.js",
+    "portal/ui/app.js",
     "industrial_simulator/main.py",
     "industrial_simulator/app/sql_server_helper.ps1",
 }
@@ -29,6 +35,7 @@ REQUIRED_FILES = {
 ALLOWED_DIRS = {
     "runtime/python",
     "wheels",
+    "portal/ui",
     "industrial_simulator/app",
     "industrial_simulator/frontend",
     "industrial_simulator/sample_data",
