@@ -362,7 +362,7 @@ async def _add_shared_group(
         root = host.root_folder
         if root is None:
             root = await server.nodes.objects.add_folder(namespace_index, host.root_folder_name)
-        group_name = safe_name(simulation_id)
+        group_name = safe_name(f"{simulation_id}.{target_id}")
         folder = await root.add_folder(namespace_index, group_name)
         for signal in schema:
             logical_node_id = node_map[signal.name]
