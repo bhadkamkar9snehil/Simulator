@@ -41,8 +41,8 @@ def capabilities() -> dict[str, Any]:
             "planned": ["parquet", "sql", "http", "recorded_opcua", "recorded_mqtt"],
         },
         "targets": {
-            "implemented": ["opcua", "mqtt", "http", "memory"],
-            "planned": ["odata", "sql", "modbus_tcp", "kafka"],
+            "implemented": ["opcua", "mqtt", "http", "sql_server", "odata", "memory"],
+            "planned": ["modbus_tcp", "kafka"],
         },
         "hosting_modes": ["shared", "dedicated"],
         "loop_modes": ["once", "loop_forever", "hold_last", "ping_pong"],
