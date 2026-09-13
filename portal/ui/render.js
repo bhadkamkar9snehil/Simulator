@@ -4,7 +4,6 @@ import {
   canResume,
   canStart,
   canStop,
-  findTarget,
   opcUaTargets,
   simulationProgress,
   sourceKindLabel,
@@ -32,9 +31,8 @@ function esc(value) {
 
 function attr(value) { return esc(value); }
 function checked(value) { return value ? "checked" : ""; }
-function selected(value, expected) { return value === expected ? "selected" : ""; }
+function selected(value, expected) { return String(value ?? "") === String(expected) ? "selected" : ""; }
 function disabled(value) { return value ? "disabled" : ""; }
-function num(value, fallback = "") { return Number.isFinite(Number(value)) ? Number(value) : fallback; }
 
 function stateClass(state) {
   return ["running", "paused", "degraded", "error"].includes(state) ? state : "";
@@ -128,6 +126,7 @@ export function renderDetailHeader(definition, status, dirty, isNew) {
         <button class="button secondary" data-action="pause" ${disabled(!canPause(status))}>Pause</button>
         <button class="button secondary" data-action="resume" ${disabled(!canResume(status))}>Resume</button>
         <button class="button danger" data-action="stop" ${disabled(!canStop(status))}>Stop</button>
+        <button class="button danger" data-action="delete">${isNew ? "Discard" : "Delete"}</button>
       </div>
     </div>
     <div class="detail-subline">
@@ -205,6 +204,13 @@ function renderSource({ definition, editable, resources, generatorSpec, preview 
     <div class="section-stack">
       ${!editable ? lockedNotice() : ""}
       <section class="panel">
+        <div class="panel-head"><div><h3>Identity</h3><p>Stable simulation ID with a user-facing name.</p></div></div>
+        <div class="panel-body"><div class="form-grid">
+          ${fieldText("Simulation name", "name", definition.name || "Simulation", "span-6", editable, "Used throughout the workspace and protocol diagnostics.")}
+          ${readOnlyField("Simulation ID", definition.simulation_id, "span-6", "Stable runtime identity; duplicate to create a new ID.")}
+        </div></div>
+      </section>
+      <section class="panel">
         <div class="panel-head"><div><h3>Source</h3><p>One source drives this simulation. Targets never know where values came from.</p></div><div class="panel-actions"><button class="button secondary" data-action="preview-source">Preview source</button></div></div>
         <div class="panel-body">
           <div class="form-grid">
@@ -223,13 +229,14 @@ function renderSource({ definition, editable, resources, generatorSpec, preview 
 }
 
 function renderCsvSource(config, resources, editable) {
-  const files = resources.files || [];
+  const area = config.csv_source || "uploaded";
+  const files = (resources.files || []).filter((file) => file.source === area);
   return `
-    ${fieldSelect("File", "source.config.filename", config.filename || "", [["", "Select file"], ...files.map((file) => [file.filename, `${file.filename} · ${file.source}`])], "span-8", editable)}
-    ${fieldSelect("File area", "source.config.csv_source", config.csv_source || "uploaded", [["uploaded", "Uploaded"], ["generated", "Generated"], ["sample", "Sample"]], "span-4", editable)}
+    ${fieldSelect("File area", "source.config.csv_source", area, [["uploaded", "Uploaded"], ["generated", "Generated"], ["sample", "Sample"]], "span-4", editable)}
+    ${fieldSelect("File", "source.config.filename", config.filename || "", [["", files.length ? "Select file" : "No files in this area"], ...files.map((file) => [file.filename, `${file.filename} · ${file.row_count} rows`])], "span-8", editable)}
     ${fieldNumber("Start row", "source.config.start_row", config.start_row ?? 0, "span-4", editable, "integer")}
     ${fieldNumber("Maximum rows", "source.config.max_rows", config.max_rows ?? "", "span-4", editable, "integer", "Blank means all available rows.")}
-    ${fieldText("Context fields", "source.config.context_fields_text", Array.isArray(config.context_fields) ? config.context_fields.join(", ") : "", "span-4", editable, "Comma-separated fields to keep in frame context.", "context-fields")}`;
+    ${fieldText("Context fields", "source.config.context_fields_text", Array.isArray(config.context_fields) ? config.context_fields.join(", ") : (config.context_fields_text || ""), "span-4", editable, "Comma-separated fields to keep in frame context.", "context-fields")}`;
 }
 
 function renderDatasetSource(config, resources, editable) {
@@ -238,7 +245,7 @@ function renderDatasetSource(config, resources, editable) {
     ${fieldSelect("Dataset", "source.config.dataset_id", config.dataset_id || "", [["", "Select dataset"], ...datasets.map((dataset) => [dataset.dataset_id, `${dataset.name || dataset.dataset_id} · ${dataset.storage_format || "dataset"}`])], "span-8", editable)}
     ${fieldNumber("Start row", "source.config.start_row", config.start_row ?? 0, "span-4", editable, "integer")}
     ${fieldNumber("Maximum rows", "source.config.max_rows", config.max_rows ?? "", "span-4", editable, "integer", "Blank means all available rows.")}
-    ${fieldText("Context fields", "source.config.context_fields_text", Array.isArray(config.context_fields) ? config.context_fields.join(", ") : "", "span-8", editable, "Comma-separated frame context fields.", "context-fields")}`;
+    ${fieldText("Context fields", "source.config.context_fields_text", Array.isArray(config.context_fields) ? config.context_fields.join(", ") : (config.context_fields_text || ""), "span-8", editable, "Comma-separated frame context fields.", "context-fields")}`;
 }
 
 function renderGeneratorSource(config, resources, spec, editable) {
@@ -273,8 +280,9 @@ function renderEnterpriseSource(kind, config, editable) {
 
 function renderPreview(preview) {
   const schema = preview.source_schema || [];
-  const sample = preview.sample_frame?.values || {};
+  const sample = preview.sample_frame?.values || preview.raw_sample_frame?.values || {};
   return `
+    ${preview.mapping_error ? `<div class="notice warning"><strong>Mapping needs attention.</strong> ${esc(preview.mapping_error)}. The raw source schema is still shown below so you can reload or repair the mapping.</div>` : ""}
     <section class="panel">
       <div class="panel-head"><div><h3>Source preview</h3><p>${esc(preview.source_kind)} · ${preview.source_count ?? "unknown"} rows/samples</p></div><button class="button primary" data-action="seed-mappings">Use schema for mappings</button></div>
       <div class="panel-body">
@@ -480,6 +488,10 @@ function readOnlyMetric(label, value) {
   return `<div class="field span-3"><span class="field-label">${esc(label)}</span><input value="${attr(value)}" disabled /></div>`;
 }
 
+function readOnlyField(label, value, span = "span-6", help = "") {
+  return `<div class="field ${span}"><label>${esc(label)}</label><input value="${attr(value)}" disabled />${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
+}
+
 function lockedNotice() {
   return `<div class="notice warning"><strong>Stop before editing.</strong> Runtime definitions are immutable while a simulation is running or paused. Live controls remain available from the header.</div>`;
 }
@@ -489,9 +501,10 @@ function fieldText(label, path, value, span = "span-6", editable = true, help = 
 }
 
 function fieldNumber(label, path, value, span = "span-3", editable = true, valueType = "number", help = "", min = null, max = null, step = null) {
-  return `<div class="field ${span}"><label>${esc(label)}</label><input type="number" data-bind="${attr(path)}" data-value-type="${valueType}" value="${attr(value)}" ${min != null ? `min="${attr(min)}"` : ""} ${max != null ? `max="${attr(max)}"` : ""} ${step != null ? `step="${attr(step)}"` : "step="any""} ${disabled(!editable)} />${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
+  const stepAttr = step != null ? `step="${attr(step)}"` : `step="any"`;
+  return `<div class="field ${span}"><label>${esc(label)}</label><input type="number" data-bind="${attr(path)}" data-value-type="${valueType}" value="${attr(value)}" ${min != null ? `min="${attr(min)}"` : ""} ${max != null ? `max="${attr(max)}"` : ""} ${stepAttr} ${disabled(!editable)} />${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
 }
 
 function fieldSelect(label, path, value, options, span = "span-4", editable = true, role = null, help = "") {
-  return `<div class="field ${span}"><label>${esc(label)}</label><select data-bind="${attr(path)}" ${role ? `data-role="${attr(role)}"` : ""} ${disabled(!editable)}>${options.map(([optionValue, optionLabel]) => `<option value="${attr(optionValue)}" ${selected(String(value ?? ""), String(optionValue))}>${esc(optionLabel)}</option>`).join("")}</select>${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
+  return `<div class="field ${span}"><label>${esc(label)}</label><select data-bind="${attr(path)}" ${role ? `data-role="${attr(role)}"` : ""} ${disabled(!editable)}>${options.map(([optionValue, optionLabel]) => `<option value="${attr(optionValue)}" ${selected(value, optionValue)}>${esc(optionLabel)}</option>`).join("")}</select>${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
 }
