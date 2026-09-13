@@ -32,6 +32,7 @@ if str(SUITE_ROOT) not in sys.path:
 from industrial_logging import configure_python_logging, emit_event  # noqa: E402
 from app.api import router, simulator  # noqa: E402
 from app.simulation.api import router as simulation_router  # noqa: E402
+from app.simulation.odata import router as odata_router  # noqa: E402
 from app.simulation.runtime import simulation_manager  # noqa: E402
 from app.source_simulators.router import sap_odata_router, source_api_router  # noqa: E402
 
@@ -42,6 +43,7 @@ app = FastAPI(title="Unified Industrial Simulator", version="3.0.0-alpha.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
 app.include_router(simulation_router)
+app.include_router(odata_router)
 app.include_router(source_api_router)
 app.include_router(sap_odata_router)
 app.mount("/static", StaticFiles(directory=str(FRONTEND)), name="static")
