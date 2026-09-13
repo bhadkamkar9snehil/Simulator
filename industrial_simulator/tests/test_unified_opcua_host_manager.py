@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+import asyncio
+
+from app.simulation.interfaces import opcua as opcua_module
+from app.simulation.models import SignalDefinition, SignalValue, SimulationFrame, TargetBinding
+
+
+class _FakeOpcUaServer:
+    instances: list["_FakeOpcUaServer"] = []
+
+    def __init__(self, endpoint: str | None = None, advertised_endpoint: str | None = None):
+        self.endpoint = endpoint or "opc.tcp://0.0.0.0:4840/simulator"
+        self.advertised_endpoint = advertised_endpoint or "opc.tcp://localhost:4840/simulator"
+        self.running = False
+        self.mock_mode = True
+        self.server = None
+        self.variables: dict[str, dict] = {}
+        self.start_count = 0
+        self.stop_count = 0
+        self.configured = None
+        _FakeOpcUaServer.instances.append(self)
+
+    async def start(self) -> None:
+        if not self.running:
+            self.start_count += 1
+            self.running = True
+
+    async def stop(self) -> None:
+        if self.running:
+            self.stop_count += 1
+        self.running = False
+
+    async def configure_tags(self, config) -> None:
+        self.configured = config
+        for tag in config.tags:
+            self.variables[tag.node_id] = {"value": tag.initial_value}
+
+    async def update_values(self, values) -> None:
+        for node_id, (value, _data_type) in values.items():
+            if node_id in self.variables:
+                self.variables[node_id]["value"] = value
+
+    def get_status(self) -> dict:
+        return {"running": self.running, "endpoint": self.advertised_endpoint}
+
+    def get_endpoint(self) -> str:
+        return self.advertised_endpoint
+
+
+SCHEMA = [
+    SignalDefinition(name="pressure", node_id="pressure", data_type="Double"),
+    SignalDefinition(name="running", node_id="running", data_type="Boolean"),
+]
+
+
+def _shared_binding(target_id: str = "opcua") -> TargetBinding:
+    return TargetBinding(
+        target_id=target_id,
+        kind="opcua",
+        hosting_mode="shared",
+        config={
+            "bind_host": "0.0.0.0",
+            "advertised_host": "localhost",
+            "port": 4840,
+            "path": "simulator",
+            "namespace_uri": "http://local/unified-simulator",
+            "root_folder": "Simulations",
+        },
+    )
+
+
+def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) -> None:
+    _FakeOpcUaServer.instances.clear()
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        first = await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding(), SCHEMA)
+        second = await manager.acquire_opcua("sim-b", "Simulation B", _shared_binding(), SCHEMA)
+
+        assert first.server is second.server
+        assert first.member_key == "sim-a/opcua"
+        assert second.member_key == "sim-b/opcua"
+        assert first.server.start_count == 1
+        assert first.server.stop_count == 0
+
+        status = manager.status()["shared_opcua_hosts"]["0.0.0.0:4840/simulator"]
+        assert status["simulation_count"] == 2
+        assert status["target_count"] == 2
+        assert status["tag_count"] == 4
+
+        await manager.publish_opcua(
+            first,
+            SimulationFrame(
+                simulation_id="sim-a",
+                values={"pressure": SignalValue(value=12.5, data_type="Double")},
+            ),
+        )
+        assert first.server.variables[first.node_map["pressure"]]["value"] == 12.5
+
+        await manager.release_opcua(first)
+        assert first.server.running is True
+        assert first.server.stop_count == 0
+        remaining = manager.status()["shared_opcua_hosts"]["0.0.0.0:4840/simulator"]
+        assert remaining["simulation_count"] == 1
+        assert remaining["simulation_targets"][0]["simulation_id"] == "sim-b"
+        assert all(not key.startswith("sim-a.") for key in first.server.variables)
+
+        await manager.release_opcua(second)
+        assert first.server.stop_count == 1
+        assert manager.status()["shared_opcua_hosts"] == {}
+
+    asyncio.run(exercise())
+
+
+def test_same_target_id_is_scoped_per_simulation(monkeypatch) -> None:
+    _FakeOpcUaServer.instances.clear()
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        first = await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding("primary"), SCHEMA)
+        second = await manager.acquire_opcua("sim-b", "Simulation B", _shared_binding("primary"), SCHEMA)
+        assert first.member_key != second.member_key
+        assert set(manager.status()["shared_opcua_hosts"]["0.0.0.0:4840/simulator"]["simulation_targets"][0]) >= {
+            "member_key",
+            "simulation_id",
+            "target_id",
+            "tag_count",
+        }
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_shared_listener_rejects_conflicting_host_level_settings(monkeypatch) -> None:
+    _FakeOpcUaServer.instances.clear()
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        first = await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding(), SCHEMA)
+        conflicting = _shared_binding("other")
+        conflicting.config["root_folder"] = "DifferentRoot"
+        try:
+            await manager.acquire_opcua("sim-b", "Simulation B", conflicting, SCHEMA)
+        except ValueError as exc:
+            assert "Shared OPC UA listener settings conflict" in str(exc)
+        else:
+            raise AssertionError("Expected shared host configuration conflict")
+        assert first.server.running is True
+        assert first.server.stop_count == 0
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_dedicated_targets_honor_bind_host(monkeypatch) -> None:
+    _FakeOpcUaServer.instances.clear()
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        binding = TargetBinding(
+            target_id="opcua",
+            kind="opcua",
+            hosting_mode="dedicated",
+            config={
+                "bind_host": "127.0.0.1",
+                "advertised_host": "test-host",
+                "port": 4842,
+                "path": "line-a",
+            },
+        )
+        handle = await manager.acquire_opcua("sim-a", "Simulation A", binding, SCHEMA)
+        assert handle.server.endpoint == "opc.tcp://127.0.0.1:4842/line-a"
+        assert handle.server.get_endpoint() == "opc.tcp://test-host:4842/line-a"
+        assert handle.member_key == "sim-a/opcua"
+        await manager.release_opcua(handle)
+
+    asyncio.run(exercise())
