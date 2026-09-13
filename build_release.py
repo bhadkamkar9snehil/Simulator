@@ -22,8 +22,8 @@ REQUIRED_FILES = {
     "runtime/runtime_manifest.json",
     "portal/portal_app.py",
     "portal/simulator_ui.html",
-    "portal/mssql_helper.ps1",
     "industrial_simulator/main.py",
+    "industrial_simulator/app/sql_server_helper.ps1",
 }
 
 ALLOWED_DIRS = {
