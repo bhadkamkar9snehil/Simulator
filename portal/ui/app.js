@@ -49,7 +49,8 @@ const state = {
 };
 
 function dirty() {
-  return !!state.draft && JSON.stringify(cleanDefinition(state.draft)) !== JSON.stringify(cleanDefinition(state.baseline));
+  return !!state.draft
+    && JSON.stringify(prepareDefinition(state.draft)) !== JSON.stringify(prepareDefinition(state.baseline));
 }
 
 function selectedRecord() {
@@ -67,13 +68,14 @@ function editable() {
 function cleanDefinition(definition) {
   if (!definition) return null;
   const output = clone(definition);
-  delete output.source?.config?.context_fields_text;
+  if (output.source?.config) delete output.source.config.context_fields_text;
   return output;
 }
 
 function prepareDefinition(definition) {
   const output = cleanDefinition(definition);
-  const contextText = definition?.source?.config?.context_fields_text;
+  if (!definition || !output) return output;
+  const contextText = definition.source?.config?.context_fields_text;
   if (contextText !== undefined) {
     output.source.config.context_fields = String(contextText)
       .split(",")
@@ -460,7 +462,14 @@ function filteredSimulations() {
     const stateMatch = state.stateFilter === "all" || status === state.stateFilter;
     if (!stateMatch) return false;
     if (!query) return true;
-    const text = [item.definition.name, item.definition.simulation_id, item.definition.source?.kind, item.definition.source?.config?.filename, item.definition.source?.config?.dataset_id, ...(item.definition.targets || []).map((target) => target.kind)].join(" ").toLowerCase();
+    const text = [
+      item.definition.name,
+      item.definition.simulation_id,
+      item.definition.source?.kind,
+      item.definition.source?.config?.filename,
+      item.definition.source?.config?.dataset_id,
+      ...(item.definition.targets || []).map((target) => target.kind),
+    ].join(" ").toLowerCase();
     return text.includes(query);
   });
 }
