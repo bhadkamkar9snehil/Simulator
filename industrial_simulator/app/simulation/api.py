@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisc
 from fastapi.responses import StreamingResponse
 
 from .models import SimulationDefinition, SimulationStatus, WorldDefinition
+from .preview import preview_definition
 from .runtime import simulation_manager
 
 router = APIRouter(prefix="/api/v2", tags=["Unified simulations"])
@@ -38,7 +39,8 @@ def capabilities() -> dict[str, Any]:
     return {
         "sources": {
             "implemented": ["csv", "dataset", "generator", "source_simulator", "sap_pp", "lims_odbc", "inline"],
-            "planned": ["parquet", "sql", "http", "recorded_opcua", "recorded_mqtt"],
+            "planned": ["sql", "http", "recorded_opcua", "recorded_mqtt"],
+            "dataset_storage": ["csv", "xlsx", "parquet", "parquet_folder"],
         },
         "targets": {
             "implemented": ["opcua", "mqtt", "http", "sql_server", "odata", "memory"],
@@ -72,6 +74,11 @@ def list_simulations() -> list[dict[str, Any]]:
         }
         for status_item in simulation_manager.list_status()
     ]
+
+
+@router.post("/simulations/preview")
+async def preview_simulation(definition: SimulationDefinition) -> dict[str, Any]:
+    return await _call(preview_definition, definition)
 
 
 @router.post("/simulations", response_model=SimulationStatus, status_code=status.HTTP_201_CREATED)
