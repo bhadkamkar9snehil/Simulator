@@ -10,6 +10,8 @@ from typing import Any, Callable
 from app.config_store import CONFIG_DIR, ensure_dir
 
 from .contracts import SimulationSource, SimulationTarget
+from .interfaces import InterfaceHostManager, create_target
+from .mapping import map_frame, map_schema
 from .models import (
     RuntimeSnapshot,
     SignalDefinition,
@@ -22,7 +24,6 @@ from .models import (
     utc_now_iso,
 )
 from .sources import create_source
-from .targets import InterfaceHostManager, create_target
 
 log = logging.getLogger("industrial.unified_runtime")
 
@@ -187,9 +188,13 @@ class SimulationInstance:
             try:
                 self.source = create_source(self.definition.source, self.definition.simulation_id)
                 await self.source.open()
-                schema = self.source.schema()
+                schema = map_schema(
+                    self.source.schema(),
+                    self.definition.mappings,
+                    self.definition.drop_unmapped_signals,
+                )
                 if not schema:
-                    raise ValueError("Simulation source produced an empty signal schema.")
+                    raise ValueError("Simulation mapping produced an empty signal schema.")
                 self.start_position = self.source.position
                 self.runners = self._build_runners()
                 for runner in self.runners:
@@ -303,10 +308,15 @@ class SimulationInstance:
             await self._close_resources()
 
     def _decorate_frame(self, frame: SimulationFrame) -> SimulationFrame:
-        context = dict(frame.context)
+        mapped = map_frame(frame, self.definition.mappings, self.definition.drop_unmapped_signals)
+        context = dict(mapped.context)
         if self.definition.world_id:
             context.setdefault("world_id", self.definition.world_id)
-        return frame.model_copy(update={"sequence": self.emitted_count, "timestamp": utc_now_iso(), "context": context})
+        return mapped.model_copy(update={
+            "sequence": self.emitted_count,
+            "timestamp": utc_now_iso(),
+            "context": context,
+        })
 
     async def _next_frame(self) -> SimulationFrame | None:
         source = self.source
@@ -498,7 +508,11 @@ class SimulationManager:
         return results
 
     def runtime_snapshot(self) -> RuntimeSnapshot:
-        return RuntimeSnapshot(simulations=self.list_status(), worlds=list(self.worlds.values()), persistence_error=self.persistence_error)
+        return RuntimeSnapshot(
+            simulations=self.list_status(),
+            worlds=list(self.worlds.values()),
+            persistence_error=self.persistence_error,
+        )
 
     def interface_status(self) -> dict[str, Any]:
         return self.hosts.status()
@@ -537,7 +551,12 @@ class SimulationManager:
 
     @staticmethod
     def _created_status(definition: SimulationDefinition) -> SimulationStatus:
-        return SimulationStatus(simulation_id=definition.simulation_id, name=definition.name, state="created", world_id=definition.world_id)
+        return SimulationStatus(
+            simulation_id=definition.simulation_id,
+            name=definition.name,
+            state="created",
+            world_id=definition.world_id,
+        )
 
     def _load(self) -> None:
         if not self.state_path.exists():
