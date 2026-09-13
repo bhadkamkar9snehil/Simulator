@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import threading
+import asyncio
 from typing import Any
 
-from app.models import ReplayConfig, CurrentValue, ProtocolMode
-from app.opcua_server import OpcUaTagServer
+from app.models import CurrentValue, ProtocolMode, ReplayConfig
 from app.mqtt_publisher import MqttTagPublisher
+from app.opcua_server import OpcUaTagServer
 
 
 class DualProtocolAdapter:
@@ -13,7 +13,7 @@ class DualProtocolAdapter:
         self.opcua = OpcUaTagServer()
         self.mqtt = MqttTagPublisher()
         self.protocol: ProtocolMode = "opcua"
-        self._io_lock = threading.RLock()
+        self._io_lock = asyncio.Lock()
 
     def _running_protocol(self) -> ProtocolMode:
         opcua_running = bool(self.opcua.get_status().get("running"))
@@ -28,12 +28,12 @@ class DualProtocolAdapter:
         await self.start_channels(self.protocol)
 
     async def stop(self) -> None:
-        with self._io_lock:
+        async with self._io_lock:
             await self.mqtt.stop()
             await self.opcua.stop()
 
     async def configure_tags(self, config: ReplayConfig) -> None:
-        with self._io_lock:
+        async with self._io_lock:
             self.protocol = config.protocol
 
             if self.protocol == "opcua":
@@ -49,8 +49,6 @@ class DualProtocolAdapter:
                 await self.mqtt.configure_tags(config)
                 return
 
-            # BOTH mode: one shared tag model drives OPC UA and MQTT together.
-            # OPC UA is restarted on configure to keep a single clean TagSimulator root.
             await self.opcua.stop()
             await self.opcua.start()
             await self.opcua.configure_tags(config)
@@ -60,7 +58,7 @@ class DualProtocolAdapter:
     async def configure_channel_tags(self, protocol: str, config: ReplayConfig) -> None:
         if protocol not in ("opcua", "mqtt"):
             raise ValueError("Protocol must be opcua or mqtt.")
-        with self._io_lock:
+        async with self._io_lock:
             if protocol == "opcua":
                 await self.opcua.stop()
                 await self.opcua.start()
@@ -73,7 +71,7 @@ class DualProtocolAdapter:
     async def start_channels(self, protocol: str) -> None:
         if protocol not in ("opcua", "mqtt", "both"):
             raise ValueError("Protocol must be opcua, mqtt, or both.")
-        with self._io_lock:
+        async with self._io_lock:
             if protocol in ("opcua", "both"):
                 await self.opcua.start()
             if protocol in ("mqtt", "both"):
@@ -83,7 +81,7 @@ class DualProtocolAdapter:
     async def stop_channels(self, protocol: str) -> None:
         if protocol not in ("opcua", "mqtt", "both"):
             raise ValueError("Protocol must be opcua, mqtt, or both.")
-        with self._io_lock:
+        async with self._io_lock:
             if protocol in ("mqtt", "both"):
                 await self.mqtt.stop()
             if protocol in ("opcua", "both"):
@@ -97,7 +95,13 @@ class DualProtocolAdapter:
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        await self.update_channel_values(self.protocol, values, timestamp=timestamp, current_values=current_values, mqtt_metadata=mqtt_metadata)
+        await self.update_channel_values(
+            self.protocol,
+            values,
+            timestamp=timestamp,
+            current_values=current_values,
+            mqtt_metadata=mqtt_metadata,
+        )
 
     async def update_channel_values(
         self,
@@ -109,11 +113,16 @@ class DualProtocolAdapter:
     ) -> None:
         if protocol not in ("opcua", "mqtt", "both"):
             raise ValueError("Protocol must be opcua, mqtt, or both.")
-        with self._io_lock:
+        async with self._io_lock:
             if protocol in ("opcua", "both"):
                 await self.opcua.update_values(values)
             if protocol in ("mqtt", "both"):
-                await self.mqtt.update_values(values, timestamp=timestamp, current_values=current_values, mqtt_metadata=mqtt_metadata)
+                await self.mqtt.update_values(
+                    values,
+                    timestamp=timestamp,
+                    current_values=current_values,
+                    mqtt_metadata=mqtt_metadata,
+                )
 
     def get_endpoint(self) -> str:
         if self.protocol == "opcua":
@@ -133,12 +142,7 @@ class DualProtocolAdapter:
 
 
 class ProtocolChannelAdapter:
-    """Adapter view for one protocol while sharing the same underlying services.
-
-    This lets OPC UA and MQTT run at the same time with different file sets.
-    An OPC UA replay engine sends only to OPC UA; an MQTT replay engine sends only
-    to MQTT. Both channels still share the same UI status and lifecycle.
-    """
+    """Legacy single-protocol view over shared protocol services."""
 
     def __init__(self, parent: DualProtocolAdapter, protocol: str) -> None:
         if protocol not in ("opcua", "mqtt"):
@@ -150,8 +154,6 @@ class ProtocolChannelAdapter:
         await self.parent.start_channels(self.protocol)
 
     async def stop(self) -> None:
-        # Engines call stop during reconfiguration. Do not stop shared protocol
-        # services here; MultiSimulatorEngine owns final service shutdown.
         return None
 
     async def configure_tags(self, config: ReplayConfig) -> None:
@@ -164,7 +166,13 @@ class ProtocolChannelAdapter:
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        await self.parent.update_channel_values(self.protocol, values, timestamp=timestamp, current_values=current_values, mqtt_metadata=mqtt_metadata)
+        await self.parent.update_channel_values(
+            self.protocol,
+            values,
+            timestamp=timestamp,
+            current_values=current_values,
+            mqtt_metadata=mqtt_metadata,
+        )
 
     def get_endpoint(self) -> str:
         if self.protocol == "opcua":
@@ -173,7 +181,7 @@ class ProtocolChannelAdapter:
 
 
 class ReplayJobProtocolAdapter:
-    """Per-job protocol view over the shared protocol services."""
+    """Legacy per-job protocol view over shared protocol services."""
 
     def __init__(self, parent: DualProtocolAdapter, protocol: str) -> None:
         if protocol not in ("opcua", "mqtt", "both"):
@@ -182,9 +190,6 @@ class ReplayJobProtocolAdapter:
         self.protocol = protocol
 
     async def configure_tags(self, config: ReplayConfig) -> None:
-        # Managed replay jobs reconfigure the shared protocol services with the
-        # union of all active job tags. Individual engines should not clear the
-        # server/broker tag catalog while another job is running.
         return None
 
     async def start(self) -> None:
@@ -200,7 +205,13 @@ class ReplayJobProtocolAdapter:
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        await self.parent.update_channel_values(self.protocol, values, timestamp=timestamp, current_values=current_values, mqtt_metadata=mqtt_metadata)
+        await self.parent.update_channel_values(
+            self.protocol,
+            values,
+            timestamp=timestamp,
+            current_values=current_values,
+            mqtt_metadata=mqtt_metadata,
+        )
 
     def get_endpoint(self) -> str:
         if self.protocol == "opcua":
