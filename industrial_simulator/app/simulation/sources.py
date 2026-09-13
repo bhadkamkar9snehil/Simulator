@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 from typing import Any
 
+import pyarrow.parquet as pq
+
 from app import csv_manager, dataset_manager
 from app.generator_registry import get_generator
 from app.models import GenerateRequest, TagMapping
@@ -51,13 +53,78 @@ class IndexedCsvRows:
         return {column: values[i] if i < len(values) else "" for i, column in enumerate(self.columns)}
 
 
+class IndexedParquetRows:
+    """Random-access Parquet rows with one row-group cache.
+
+    A directory is treated as a multi-file Parquet dataset. This keeps replay
+    memory bounded while still supporting seek and ping-pong loop modes.
+    """
+
+    def __init__(self, path: Path, max_rows: int | None = None):
+        paths = sorted(path.rglob("*.parquet")) if path.is_dir() else [path]
+        if not paths:
+            raise ValueError(f"No Parquet files found at {path}.")
+
+        self.columns: list[str] = []
+        self._segments: list[tuple[pq.ParquetFile, int, int]] = []
+        self._cached_key: tuple[int, int] | None = None
+        self._cached_rows: list[dict[str, Any]] = []
+        total = 0
+
+        for file_path in paths:
+            parquet_file = pq.ParquetFile(file_path)
+            for column in parquet_file.schema_arrow.names:
+                if column not in self.columns:
+                    self.columns.append(column)
+            available = int(parquet_file.metadata.num_rows)
+            if max_rows is not None:
+                available = min(available, max(0, int(max_rows) - total))
+            if available <= 0:
+                break
+            self._segments.append((parquet_file, total, available))
+            total += available
+            if max_rows is not None and total >= int(max_rows):
+                break
+
+        self.row_count = total
+        if self.row_count <= 0:
+            raise ValueError("Parquet source has no data rows.")
+
+    def row(self, index: int) -> dict[str, Any]:
+        if index < 0 or index >= self.row_count:
+            raise IndexError("Parquet row index out of range.")
+        for file_index, (parquet_file, start, available) in enumerate(self._segments):
+            if not (start <= index < start + available):
+                continue
+            local_index = index - start
+            row = self._row_from_file(file_index, parquet_file, local_index)
+            return {column: row.get(column, "") for column in self.columns}
+        raise IndexError("Parquet row index could not be resolved.")
+
+    def _row_from_file(self, file_index: int, parquet_file: pq.ParquetFile, local_index: int) -> dict[str, Any]:
+        remaining = local_index
+        for row_group in range(parquet_file.metadata.num_row_groups):
+            row_count = int(parquet_file.metadata.row_group(row_group).num_rows)
+            if remaining < row_count:
+                key = (file_index, row_group)
+                if self._cached_key != key:
+                    self._cached_rows = parquet_file.read_row_group(row_group).to_pylist()
+                    self._cached_key = key
+                return self._cached_rows[remaining]
+            remaining -= row_count
+        raise IndexError("Parquet row index exceeds row-group metadata.")
+
+
+IndexedRows = IndexedCsvRows | IndexedParquetRows
+
+
 class _RowSource:
     def __init__(self, simulation_id: str, config: dict[str, Any]):
         self.simulation_id = simulation_id
         self.config = config
         self._position = 0
         self._rows: list[dict[str, Any]] = []
-        self._indexed: IndexedCsvRows | None = None
+        self._indexed: IndexedRows | None = None
         self._columns: list[str] = []
         self._mappings: list[TagMapping] = []
         self._count: int | None = None
@@ -111,7 +178,7 @@ class _RowSource:
         rows: list[dict[str, Any]],
         count: int,
         mappings: list[TagMapping] | None = None,
-        indexed: IndexedCsvRows | None = None,
+        indexed: IndexedRows | None = None,
     ) -> None:
         if count <= 0:
             raise ValueError("Simulation source has no data rows.")
@@ -187,7 +254,7 @@ class CsvSimulationSource(_RowSource):
         if dataset_id:
             manifest = dataset_manager.get_dataset(str(dataset_id))
             if manifest.storage_format != "csv":
-                raise ValueError("Unified runtime currently replays registered datasets only when storage_format is csv.")
+                raise ValueError("CSV source requires a dataset with storage_format=csv.")
             path = dataset_manager.dataset_path(manifest)
         else:
             filename = str(require_config(self.config, "filename"))
@@ -207,6 +274,35 @@ class CsvSimulationSource(_RowSource):
 
         columns, rows = csv_manager.read_rows(path, max_rows=max_rows)
         self._configure_rows(columns, rows, len(rows), mappings=self._configured_mappings())
+
+
+class ParquetSimulationSource(_RowSource):
+    """Parquet file/folder replay with row-group-level memory use."""
+
+    async def open(self) -> None:
+        max_rows = self.config.get("max_rows")
+        if max_rows is not None:
+            max_rows = int(max_rows)
+
+        dataset_id = self.config.get("dataset_id")
+        if dataset_id:
+            manifest = dataset_manager.get_dataset(str(dataset_id))
+            if manifest.storage_format not in {"parquet", "parquet_folder"}:
+                raise ValueError("Parquet source requires a parquet or parquet_folder dataset.")
+            path = dataset_manager.dataset_path(manifest)
+        else:
+            path = Path(str(require_config(self.config, "path"))).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"Parquet source not found: {path}")
+
+        indexed = IndexedParquetRows(path, max_rows=max_rows)
+        self._configure_rows(
+            columns=indexed.columns,
+            rows=[],
+            count=indexed.row_count,
+            mappings=self._configured_mappings(),
+            indexed=indexed,
+        )
 
 
 class InlineSimulationSource(_RowSource):
@@ -293,7 +389,13 @@ def create_source(binding: SourceBinding, simulation_id: str) -> SimulationSourc
         config = dict(binding.config)
         if binding.kind == "dataset" and "dataset_id" not in config:
             raise ValueError("Dataset source requires config.dataset_id.")
+        if binding.kind == "dataset" and config.get("dataset_id"):
+            manifest = dataset_manager.get_dataset(str(config["dataset_id"]))
+            if manifest.storage_format in {"parquet", "parquet_folder"}:
+                return ParquetSimulationSource(simulation_id, config)
         return CsvSimulationSource(simulation_id, config)
+    if binding.kind in {"parquet", "parquet_folder"}:
+        return ParquetSimulationSource(simulation_id, dict(binding.config))
     if binding.kind == "generator":
         return GeneratorSimulationSource(simulation_id, dict(binding.config))
     if binding.kind in {"source_simulator", "sap_pp", "lims_odbc"}:
