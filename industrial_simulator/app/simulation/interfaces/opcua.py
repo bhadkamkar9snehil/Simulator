@@ -14,6 +14,7 @@ from .common import safe_name, tag_mapping
 @dataclass
 class OpcUaHandle:
     key: str
+    member_key: str
     target_id: str
     simulation_id: str
     server: OpcUaTagServer
@@ -25,6 +26,7 @@ class OpcUaHandle:
 class _SharedGroup:
     simulation_id: str
     simulation_name: str
+    target_id: str
     node_map: dict[str, str]
     variable_keys: set[str]
     folder: Any = None
@@ -72,7 +74,7 @@ class InterfaceHostManager:
 
     async def release_opcua(self, handle: OpcUaHandle) -> None:
         if not handle.shared:
-            self._dedicated_opcua.pop(handle.target_id, None)
+            self._dedicated_opcua.pop(handle.member_key, None)
             await handle.server.stop()
             return
 
@@ -82,7 +84,7 @@ class InterfaceHostManager:
             return
 
         async with host.lock:
-            await _remove_shared_group(host, handle.target_id)
+            await _remove_shared_group(host, handle.member_key)
             if host.groups:
                 return
             await host.server.stop()
@@ -133,19 +135,29 @@ class InterfaceHostManager:
                     "path": host.path,
                     "namespace_uri": host.namespace_uri,
                     "root_folder": host.root_folder_name,
-                    "simulation_targets": list(host.groups),
-                    "simulation_count": len(host.groups),
+                    "simulation_targets": [
+                        {
+                            "member_key": member_key,
+                            "simulation_id": group.simulation_id,
+                            "target_id": group.target_id,
+                            "tag_count": len(group.node_map),
+                        }
+                        for member_key, group in host.groups.items()
+                    ],
+                    "simulation_count": len({group.simulation_id for group in host.groups.values()}),
+                    "target_count": len(host.groups),
                     "tag_count": sum(len(group.node_map) for group in host.groups.values()),
                 }
                 for key, host in self._shared_opcua.items()
             },
             "dedicated_opcua_hosts": {
-                target_id: {
+                member_key: {
                     **handle.server.get_status(),
                     "simulation_id": handle.simulation_id,
+                    "target_id": handle.target_id,
                     "tag_count": len(handle.node_map),
                 }
-                for target_id, handle in self._dedicated_opcua.items()
+                for member_key, handle in self._dedicated_opcua.items()
             },
         }
 
@@ -164,6 +176,7 @@ class InterfaceHostManager:
         namespace_uri = str(config.get("namespace_uri", "http://local/unified-simulator"))
         root_folder = str(config.get("root_folder", "Simulations")).strip() or "Simulations"
         key = _listener_key(bind_host, port, path)
+        member_key = _member_key(simulation_id, binding.target_id)
 
         async with self._manager_lock:
             host = self._shared_opcua.get(key)
@@ -190,7 +203,15 @@ class InterfaceHostManager:
                 if not host.server.running:
                     await host.server.start()
                 node_map = _shared_node_map(simulation_id, binding.target_id, schema)
-                await _add_shared_group(host, binding.target_id, simulation_id, simulation_name, schema, node_map)
+                await _add_shared_group(
+                    host,
+                    member_key,
+                    binding.target_id,
+                    simulation_id,
+                    simulation_name,
+                    schema,
+                    node_map,
+                )
         except Exception:
             async with self._manager_lock:
                 if not host.groups and self._shared_opcua.get(key) is host:
@@ -199,7 +220,7 @@ class InterfaceHostManager:
                 await host.server.stop()
             raise
 
-        return OpcUaHandle(key, binding.target_id, simulation_id, host.server, node_map, True)
+        return OpcUaHandle(key, member_key, binding.target_id, simulation_id, host.server, node_map, True)
 
     async def _acquire_dedicated(
         self,
@@ -215,6 +236,9 @@ class InterfaceHostManager:
         port = int(config["port"])
         path = str(config.get("path", safe_name(simulation_id))).strip("/") or safe_name(simulation_id)
         advertised_host = str(config.get("advertised_host", "localhost")).strip() or "localhost"
+        member_key = _member_key(simulation_id, binding.target_id)
+        if member_key in self._dedicated_opcua:
+            raise ValueError(f"Dedicated OPC UA target already exists: {member_key}")
         server = OpcUaTagServer(
             endpoint=f"opc.tcp://{bind_host}:{port}/{path}",
             advertised_endpoint=f"opc.tcp://{advertised_host}:{port}/{path}",
@@ -229,8 +253,8 @@ class InterfaceHostManager:
                 str(config.get("root_folder", safe_name(simulation_name))),
             )
         )
-        handle = OpcUaHandle(binding.target_id, binding.target_id, simulation_id, server, node_map, False)
-        self._dedicated_opcua[binding.target_id] = handle
+        handle = OpcUaHandle(binding.target_id, member_key, binding.target_id, simulation_id, server, node_map, False)
+        self._dedicated_opcua[member_key] = handle
         return handle
 
 
@@ -275,6 +299,7 @@ class OpcUaTarget:
                 **self._handle.server.get_status(),
                 "shared": self._handle.shared,
                 "host_key": self._handle.key,
+                "member_key": self._handle.member_key,
                 "tag_count": len(self._handle.node_map),
             }
             endpoint = self._handle.server.get_endpoint()
@@ -290,6 +315,10 @@ class OpcUaTarget:
 
 def _listener_key(bind_host: str, port: int, path: str) -> str:
     return f"{bind_host}:{port}/{path}"
+
+
+def _member_key(simulation_id: str, target_id: str) -> str:
+    return f"{simulation_id}/{target_id}"
 
 
 def _validate_shared_host(
@@ -325,14 +354,15 @@ def _shared_node_map(
 
 async def _add_shared_group(
     host: _SharedOpcUaHost,
+    member_key: str,
     target_id: str,
     simulation_id: str,
     simulation_name: str,
     schema: list[SignalDefinition],
     node_map: dict[str, str],
 ) -> None:
-    if target_id in host.groups:
-        raise ValueError(f"Shared OPC UA target already exists: {target_id}")
+    if member_key in host.groups:
+        raise ValueError(f"Shared OPC UA target already exists: {member_key}")
 
     duplicate = set(node_map.values()).intersection(host.server.variables)
     if duplicate:
@@ -345,9 +375,10 @@ async def _add_shared_group(
                 "value": _initial_value(signal.data_type, signal.initial_value),
                 "signal": signal,
             }
-        host.groups[target_id] = _SharedGroup(
+        host.groups[member_key] = _SharedGroup(
             simulation_id,
             simulation_name,
+            target_id,
             node_map,
             set(node_map.values()),
         )
@@ -384,17 +415,18 @@ async def _add_shared_group(
     namespace_index, root, folder = await host.server._run_in_server_loop(add_impl())
     host.namespace_index = namespace_index
     host.root_folder = root
-    host.groups[target_id] = _SharedGroup(
+    host.groups[member_key] = _SharedGroup(
         simulation_id,
         simulation_name,
+        target_id,
         node_map,
         set(node_map.values()),
         folder,
     )
 
 
-async def _remove_shared_group(host: _SharedOpcUaHost, target_id: str) -> None:
-    group = host.groups.pop(target_id, None)
+async def _remove_shared_group(host: _SharedOpcUaHost, member_key: str) -> None:
+    group = host.groups.pop(member_key, None)
     if group is None:
         return
 
