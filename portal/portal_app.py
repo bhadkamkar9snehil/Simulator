@@ -5,7 +5,6 @@ import os
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -16,9 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+INDUSTRIAL_ROOT = ROOT / "industrial_simulator"
+for path in (ROOT, INDUSTRIAL_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
+from app.sql_server import run_sql_action as run_mssql  # noqa: E402
 from suite_runtime import (  # noqa: E402
     VENV_PY as SUITE_VENV_PY,
     VENV_PYW as SUITE_VENV_PYW,
@@ -100,47 +102,6 @@ def get_service(url: str) -> dict[str, Any]:
             return {"ok": True, "status": response.status}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-
-
-def run_mssql(action: str, cfg: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    payload = dict(cfg or {})
-    payload["action"] = action
-    if rows is not None:
-        payload["rows"] = rows
-
-    helper = ROOT / "portal" / "mssql_helper.ps1"
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as handle:
-        json.dump(payload, handle)
-        payload_path = handle.name
-
-    try:
-        powershell = "powershell.exe" if os.name == "nt" else "pwsh"
-        completed = subprocess.run(
-            [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helper), payload_path],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            creationflags=CREATE_NO_WINDOW,
-        )
-        stdout = (completed.stdout or "").strip()
-        stderr = (completed.stderr or "").strip()
-        try:
-            result = json.loads(stdout) if stdout else {}
-        except json.JSONDecodeError:
-            result = {"raw": stdout}
-        result["returncode"] = completed.returncode
-        if stderr:
-            result["stderr"] = stderr
-        if completed.returncode != 0:
-            result.setdefault("ok", False)
-        return result
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-    finally:
-        try:
-            os.unlink(payload_path)
-        except OSError:
-            pass
 
 
 def current_industrial_rows() -> list[dict[str, Any]]:
