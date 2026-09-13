@@ -1,99 +1,92 @@
 # Simulator
 
-A central, multi-protocol industrial simulator. It generates domain-specific
-process data (13 industrial domains) and synthetic camera video, then replays
-or streams that data concurrently over OPC UA, MQTT, and HTTP (NDJSON/SSE/
-WebSocket), with SAP PP and LIMS ODBC source simulators and SQL Server
-projection on top. Everything is driven from one web portal.
+Windows/offline industrial simulation suite for generating and replaying process data through OPC UA and other integration interfaces.
 
-## Product direction and requirements
+## Product direction
 
-The long-term product direction is a unified, concurrent, multi-source,
-multi-target simulator in which independent Simulation Instances can run at
-the same time and serve one or more shared or dedicated interface targets.
+The primary product path is a **simulation-centric, concurrent OPC UA simulator**:
 
-- [Unified Multi-Interface Simulator — Product and Architecture Requirements](docs/UNIFIED_SIMULATOR_REQUIREMENTS.md)
-- [Current State, Ponytail and Complexity Baseline](docs/CURRENT_STATE_AND_COMPLEXITY_BASELINE.md)
+- run many independent simulations at once;
+- source each simulation from files, registered datasets, industrial generators, or enterprise source simulators;
+- tune timing, replay, mappings and targets independently per simulation;
+- serve simulations through shared or dedicated OPC UA endpoints;
+- attach optional MQTT, HTTP, SQL Server and OData targets to the same canonical simulation stream;
+- manage the normal workflow from the Portal UI rather than protocol-specific replay pages.
 
-The requirements document is the architectural north star. The current-state
-baseline records implementation debt and migration findings at the documented
-baseline commit; it is expected to become obsolete as those findings are
-addressed.
+Detailed product and architecture documents:
 
-> Maintain this section list as features change. Architecture/agent documentation
-> must distinguish current implementation from target architecture.
+- [`docs/UNIFIED_SIMULATOR_REQUIREMENTS.md`](docs/UNIFIED_SIMULATOR_REQUIREMENTS.md)
+- [`docs/CURRENT_STATE_AND_COMPLEXITY_BASELINE.md`](docs/CURRENT_STATE_AND_COMPLEXITY_BASELINE.md)
+- [`docs/UNIFIED_RUNTIME_IMPLEMENTATION.md`](docs/UNIFIED_RUNTIME_IMPLEMENTATION.md)
 
-## Quick start
+## Start
 
-- Single entrypoint: `RUN_SIMULATOR.bat` (double-click or run from terminal)
-- Portal UI: http://localhost:8001 — the only user-facing surface
-- Bundled Python runtime: `runtime/python/python.exe` (ships in git, no separate install)
-- Setup: `irm https://raw.githubusercontent.com/bhadkamkar9snehil/Simulator/main/setup_simulator.ps1 | iex`
+On the supported Windows/offline distribution, run:
 
-What `RUN_SIMULATOR.bat` does:
+```bat
+RUN_SIMULATOR.bat
+```
 
-- uses the bundled Python runtime in `runtime/python`
-- validates or recreates `.venv`, installing only from the bundled offline wheelhouse
-- starts the internal MQTT broker, Industrial service, and Portal hidden, orchestrated by `suite_runtime.py`
-- leaves legacy API Studio disabled
-- opens the portal automatically
+Default services:
 
-## Architecture
+- Portal: `http://localhost:8001`
+- Industrial API: `http://localhost:8000`
+- OPC UA: `opc.tcp://localhost:4840/simulator`
+- MQTT broker: `localhost:1883`
 
-| Service | Port | Role |
-|---|---|---|
-| `industrial_simulator` | 8000 | All simulation logic — generation, replay, jobs, streaming, source simulators, video |
-| `api_studio` | 5050 | Legacy/reserved — currently disabled, not started by the suite |
-| `portal` | 8001 | Web UI + service lifecycle control (start/stop/ports) |
-| internal MQTT broker | 1883 | Local MQTT data-plane endpoint for simulator publishing/testing |
-| OPC UA | 4840 | Local OPC UA data-plane endpoint |
+The Portal root is the new simulation workspace. The previous Portal surface remains temporarily available at `/legacy` during migration.
 
-`suite_runtime.py` owns startup orchestration, port assignment, and health checks in the current implementation.
+## Runtime model
 
-## Feature set
+The suite preserves the bundled Python runtime/wheelhouse deployment model. `suite_runtime.py` validates the runtime and wheelhouse, prepares the local environment, starts the suite services, and opens the Portal.
 
-**Data generation** (Generate tab, Files subtab)
-- 13 domain generators: petroleum pipeline, EAF melting, gas/LPG pipeline,
-  rotary equipment, power plant, polyester fiber, GNFC chemical process, and
-  steel-plant stages including blast furnace, coke oven, DRI, LRF, CCM, and rolling mill
-- Output as small CSV, large Parquet, or local partitioned Lakehouse
-- Target by row count, physical/logical bytes, or duration; configurable
-  batch size, compression, and speed mode
+The unified runtime is under:
 
-**Synthetic video generation** (Generate tab, Video subtab)
-- Multi-camera synthetic frame generation (PPM segments + manifest today;
-  MJPEG/HLS/MP4/RTSP planned)
-- Configurable camera count, FPS, resolution, duration, segment length, and
-  visual mode; can link a video job to a dataset
+```text
+industrial_simulator/app/simulation/
+```
 
-**Replay & streaming** (Replay, Streams tabs)
-- Replay CSV/registered datasets over OPC UA, MQTT, or both in the current implementation
-- HTTP streaming: NDJSON, Server-Sent Events, WebSocket, plus a point-in-time snapshot
-- OPC UA endpoint: `opc.tcp://localhost:4840/simulator`; MQTT topic:
-  `industrial-tag-simulator/flat`
+Its central model is:
 
-**Source simulators** (Sources tab)
-- SAP PP OData connector (query mode)
-- LIMS ODBC connector (query or cycling mode, with watermarking and
-  configurable excursion probability)
+```text
+Source
+  ↓
+Simulation Instance
+  ↓
+Canonical Frame + Mapping
+  ↓
+Target Bindings
+  ↓
+Shared / Dedicated Interface Hosts
+```
 
-**Concurrent multi-export runs** (Jobs tab)
-- Build mixes of independent exports — e.g. one dataset over OPC UA,
-  another over MQTT, a separate SAP PP feed, a separate LIMS feed, and a
-  video job — each with its own settings, launched together as one run
-- Every job (individually) and every run (as a group) supports pause,
-  resume, and stop; global Pause All / Resume All / Stop All lives in the
-  command bar
+A simulation owns its source, clock, cursor, mappings and lifecycle. Interface hosts own network listeners. A simulation can publish one canonical state stream to multiple independent targets.
 
-**Datasets & SQL** (Datasets, SQL Server tabs)
-- Upload, register, preview, scan, and delete datasets
-- Project current tag values into SQL Server
+## Current source families
 
-**Full API reference** — every route the simulator serves is listed in the
-Overview tab of the portal, grouped by category.
+- CSV / Excel
+- registered datasets
+- Parquet / Parquet folders
+- industrial domain generators
+- SAP PP source simulator
+- LIMS source simulator
+- inline rows for diagnostics/tests
 
-## Notes
+## Current target families
 
-- Stop the suite from the portal UI (Settings tab)
-- Startup logs are written to `launcher.log`; structured logs are in the Logs tab
-- Saved ports live in `simulator_ports.json`
+- OPC UA — shared or dedicated hosting
+- MQTT
+- HTTP snapshot / NDJSON / SSE / WebSocket
+- SQL Server
+- OData
+- internal/memory diagnostics
+
+## Validation policy
+
+**GitHub Actions is not used for this repository.** Do not add `.github/workflows/*`, required Actions checks, CI badges, or GitHub-hosted CI.
+
+Tests, syntax checks, complexity checks and release validation are run locally/manual or through an explicitly selected non-GitHub mechanism.
+
+## Repository boundary
+
+Simulator is standalone. Downstream applications consume Simulator through its supported interfaces; downstream-product-specific knowledge does not belong in this repository.
