@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.simulation import targets
+from app.simulation.interfaces import sql_server as sql_target
 from app.simulation.models import SignalDefinition, SignalValue, SimulationFrame, TargetBinding
 
 
@@ -15,7 +15,7 @@ def test_sql_server_target_batches_and_flushes(monkeypatch) -> None:
             return {"ok": True, "rows_written": len(rows or [])}
         return {"ok": True}
 
-    monkeypatch.setattr(targets, "run_sql_action", fake_sql)
+    monkeypatch.setattr(sql_target, "run_sql_action", fake_sql)
 
     binding = TargetBinding(
         target_id="historian",
@@ -28,7 +28,7 @@ def test_sql_server_target_batches_and_flushes(monkeypatch) -> None:
             "batch_size": 2,
         },
     )
-    target = targets.SqlServerTarget(binding)
+    target = sql_target.SqlServerTarget(binding)
     schema = [
         SignalDefinition(name="pressure", node_id="pressure", data_type="Double", unit="bar"),
         SignalDefinition(name="running", node_id="running", data_type="Boolean"),
@@ -73,8 +73,8 @@ def test_sql_server_target_surfaces_connection_failure(monkeypatch) -> None:
     def fake_sql(action: str, config: dict, rows: list[dict] | None = None, timeout: int = 60) -> dict:
         return {"ok": False, "error": "login failed"}
 
-    monkeypatch.setattr(targets, "run_sql_action", fake_sql)
-    target = targets.SqlServerTarget(TargetBinding(target_id="sql", kind="sql", config={}))
+    monkeypatch.setattr(sql_target, "run_sql_action", fake_sql)
+    target = sql_target.SqlServerTarget(TargetBinding(target_id="sql", kind="sql", config={}))
 
     async def exercise() -> None:
         try:
