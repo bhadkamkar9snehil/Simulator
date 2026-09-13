@@ -8,35 +8,36 @@ import sys
 import tempfile
 import time
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from typing import Any
+
+from fastapi import Body, FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from suite_runtime import (
-    CREATE_NO_WINDOW as SUITE_CREATE_NO_WINDOW,
-    load_ports as suite_load_ports,
-    save_ports as suite_save_ports,
-    validate_ports as suite_validate_ports,
-    start_services as suite_start_services,
-    stop_services as suite_stop_services,
-    status_payload as suite_status_payload,
-    open_app_window as suite_open_app_window,
-    VENV_PYW as SUITE_VENV_PYW,
+from suite_runtime import (  # noqa: E402
     VENV_PY as SUITE_VENV_PY,
+    VENV_PYW as SUITE_VENV_PYW,
     clear_log as suite_clear_log,
+    load_ports as suite_load_ports,
     logs_payload as suite_logs_payload,
+    open_app_window as suite_open_app_window,
+    save_ports as suite_save_ports,
+    start_services as suite_start_services,
+    status_payload as suite_status_payload,
+    stop_services as suite_stop_services,
+    validate_ports as suite_validate_ports,
 )
 
 
 def env_port(name: str, default: int, fallback_name: str | None = None) -> int:
-    values = [name]
-    if fallback_name:
-        values.append(fallback_name)
-    for key in values:
+    for key in (name, fallback_name):
+        if not key:
+            continue
         raw = str(os.environ.get(key, "")).strip()
         if not raw:
             continue
@@ -49,6 +50,8 @@ def env_port(name: str, default: int, fallback_name: str | None = None) -> int:
 
 PORT = env_port("PORTAL_PORT", 8001)
 INDUSTRIAL_PORT = env_port("INDUSTRIAL_PORT", 8000, "INDUSTRIAL_WEB_PORT")
+# Compatibility only while launcher port persistence is migrated. API Studio
+# itself has been retired and is not started or packaged.
 API_STUDIO_PORT = env_port("API_STUDIO_PORT", 5050, "PORT")
 OPCUA_PORT = env_port("OPCUA_PORT", 4840)
 MQTT_BROKER_PORT = env_port("MQTT_BROKER_PORT", 1883, "MQTT_PORT")
@@ -58,277 +61,310 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONNECTIONS_JSON = DATA_DIR / "connections.json"
 MAPPINGS_JSON = DATA_DIR / "api_source_mappings.json"
 
+app = FastAPI(title="Simulator Portal", version="3.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
+
 
 def local_ip() -> str:
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
     except Exception:
         return "127.0.0.1"
 
 
-def json_response(handler: BaseHTTPRequestHandler, code: int, data: dict) -> None:
-    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-    handler.send_response(code)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
-    handler.send_header("Content-Length", str(len(raw)))
-    handler.end_headers()
-    handler.wfile.write(raw)
-
-
-def html_response(handler: BaseHTTPRequestHandler, html: str) -> None:
-    raw = html.encode("utf-8")
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.send_header("Content-Length", str(len(raw)))
-    handler.end_headers()
-    handler.wfile.write(raw)
-
-
-def read_json(handler: BaseHTTPRequestHandler) -> dict:
-    length = int(handler.headers.get("Content-Length") or 0)
-    raw = handler.rfile.read(length).decode("utf-8") if length else "{}"
-    return json.loads(raw or "{}")
-
-
-def read_store(path: Path, default):
+def read_store(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
     try:
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return default
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default
 
 
-def write_store(path: Path, data) -> None:
+def write_store(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def get_service(url: str) -> dict:
+def get_service(url: str) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(url, timeout=2) as r:
-            return {"ok": True, "status": r.status}
+        with urllib.request.urlopen(url, timeout=2) as response:
+            return {"ok": True, "status": response.status}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
-def mssql_payload(cfg: dict, rows: list[dict] | None = None) -> dict:
+def run_mssql(action: str, cfg: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     payload = dict(cfg or {})
+    payload["action"] = action
     if rows is not None:
         payload["rows"] = rows
-    return payload
 
-
-def run_mssql(action: str, cfg: dict, rows: list[dict] | None = None) -> dict:
-    payload = mssql_payload(cfg, rows)
-    payload["action"] = action
     helper = ROOT / "portal" / "mssql_helper.ps1"
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as f:
-        json.dump(payload, f)
-        payload_path = f.name
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+        payload_path = handle.name
+
     try:
-        ps = "powershell.exe" if os.name == "nt" else "pwsh"
-        cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helper), payload_path]
-        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=60, creationflags=CREATE_NO_WINDOW)
-        out = (completed.stdout or "").strip()
-        err = (completed.stderr or "").strip()
+        powershell = "powershell.exe" if os.name == "nt" else "pwsh"
+        completed = subprocess.run(
+            [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helper), payload_path],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
         try:
-            parsed = json.loads(out) if out else {}
-        except Exception:
-            parsed = {"raw": out}
-        parsed["returncode"] = completed.returncode
-        if err:
-            parsed["stderr"] = err
+            result = json.loads(stdout) if stdout else {}
+        except json.JSONDecodeError:
+            result = {"raw": stdout}
+        result["returncode"] = completed.returncode
+        if stderr:
+            result["stderr"] = stderr
         if completed.returncode != 0:
-            parsed.setdefault("ok", False)
-        return parsed
+            result.setdefault("ok", False)
+        return result
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     finally:
         try:
             os.unlink(payload_path)
-        except Exception:
+        except OSError:
             pass
 
 
-def current_industrial_rows() -> list[dict]:
+def current_industrial_rows() -> list[dict[str, Any]]:
     url = f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/replay/current-values"
-    with urllib.request.urlopen(url, timeout=5) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    rows = []
-    for item in data.get("values", []):
-        rows.append({
+    with urllib.request.urlopen(url, timeout=5) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return [
+        {
             "ts": item.get("last_updated") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "tag_name": item.get("tag_name") or item.get("node_id") or "tag",
             "value": str(item.get("value", "")),
             "unit": item.get("data_type", ""),
             "quality": "Good",
             "description": item.get("node_id", ""),
-        })
-    return rows
+        }
+        for item in data.get("values", [])
+    ]
+
 
 def page() -> str:
-        template_path = ROOT / "portal" / "simulator_ui.html"
-        template = template_path.read_text(encoding="utf-8")
+    template = (ROOT / "portal" / "simulator_ui.html").read_text(encoding="utf-8")
+    config = {
+        "industrial_web_port": INDUSTRIAL_PORT,
+        "api_studio_port": API_STUDIO_PORT,
+        "portal_port": PORT,
+        "opcua_port": OPCUA_PORT,
+        "mqtt_port": MQTT_BROKER_PORT,
+        "mqtt_host": "localhost",
+        "lan_ip": local_ip(),
+    }
+    assignment = f"window.SIMULATOR_LAUNCHER_CONFIG = {json.dumps(config)};"
+    placeholder = "window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};"
+    if placeholder in template:
+        template = template.replace(placeholder, assignment, 1)
+    else:
+        template = template.replace("<body>", f"<body>\n<script>{assignment}</script>", 1)
 
-        config = {
-            "industrial_web_port": INDUSTRIAL_PORT,
-            "api_studio_port": API_STUDIO_PORT,
-            "portal_port": PORT,
-            "opcua_port": OPCUA_PORT,
-            "mqtt_port": MQTT_BROKER_PORT,
-            "mqtt_host": "localhost",
-            "lan_ip": local_ip(),
-        }
-        config_assignment = f"window.SIMULATOR_LAUNCHER_CONFIG = {json.dumps(config)};"
-        placeholder = "window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};"
-        if placeholder in template:
-            template = template.replace(placeholder, config_assignment, 1)
-        else:
-            template = template.replace("<body>", f"<body>\n<script>{config_assignment}</script>", 1)
+    replacements = {
+        'id="lpPortal" value="8001"': f'id="lpPortal" value="{PORT}"',
+        'id="lpIndustrial" value="8000"': f'id="lpIndustrial" value="{INDUSTRIAL_PORT}"',
+        'id="lpOpcua" value="4840"': f'id="lpOpcua" value="{OPCUA_PORT}"',
+        'id="lpMqtt" value="1883"': f'id="lpMqtt" value="{MQTT_BROKER_PORT}"',
+        'id="mqttPort" type="number" value="1883"': f'id="mqttPort" type="number" value="{MQTT_BROKER_PORT}"',
+        'id="opcuaEndpoint" value="opc.tcp://localhost:4840/simulator"': f'id="opcuaEndpoint" value="opc.tcp://localhost:{OPCUA_PORT}/simulator"',
+    }
+    for old, new in replacements.items():
+        template = template.replace(old, new)
+    return template
 
-        replacements = {
-            'href="http://127.0.0.1:5050"': f'href="http://127.0.0.1:{API_STUDIO_PORT}"',
-            'src="http://127.0.0.1:5050"': f'src="http://127.0.0.1:{API_STUDIO_PORT}"',
-            'id="lpApi" value="5050"': f'id="lpApi" value="{API_STUDIO_PORT}"',
-            'id="lpPortal" value="8001"': f'id="lpPortal" value="{PORT}"',
-            'id="lpIndustrial" value="8000"': f'id="lpIndustrial" value="{INDUSTRIAL_PORT}"',
-            'id="lpOpcua" value="4840"': f'id="lpOpcua" value="{OPCUA_PORT}"',
-            'id="lpMqtt" value="1883"': f'id="lpMqtt" value="{MQTT_BROKER_PORT}"',
-            'id="mqttPort" type="number" value="1883"': f'id="mqttPort" type="number" value="{MQTT_BROKER_PORT}"',
-            'id="opcuaEndpoint" value="opc.tcp://localhost:4840/simulator"': f'id="opcuaEndpoint" value="opc.tcp://localhost:{OPCUA_PORT}/simulator"',
-        }
-        for old, new in replacements.items():
-            template = template.replace(old, new)
 
-        return template
+@app.exception_handler(Exception)
+async def unhandled_exception(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt: str, *args) -> None:
-        return
 
-    def do_OPTIONS(self) -> None:
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+@app.get("/", response_class=HTMLResponse)
+@app.get("/index.html", response_class=HTMLResponse)
+def index() -> str:
+    return page()
 
-    def do_GET(self) -> None:
-        parsed_url = urlparse(self.path)
-        path = parsed_url.path
-        query = parse_qs(parsed_url.query)
-        if path in ("/", "/index.html"):
-            return html_response(self, page())
-        if path == "/suite/status":
-            return json_response(self, 200, {
-                "portal": {"ok": True, "port": PORT},
-                "industrial": get_service(f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/health"),
-                "api_studio": {"ok": False, "disabled": True, "message": "API Studio is not started by the portal simulator suite."},
-            })
-        if path == "/launcher/config":
-            return json_response(self, 200, suite_status_payload(suite_load_ports()))
-        if path == "/logs":
-            try:
-                limit = int((query.get("limit") or ["300"])[0] or 300)
-            except ValueError:
-                limit = 300
-            level = (query.get("level") or [""])[0]
-            source = (query.get("source") or [""])[0]
-            service = (query.get("service") or [""])[0]
-            event = (query.get("event") or [""])[0]
-            text = (query.get("q") or [""])[0]
-            return json_response(self, 200, suite_logs_payload(limit=max(50, min(limit, 1000)), level=level, source=source, service=service, event=event, query=text))
-        if path == "/connections":
-            return json_response(self, 200, {"connections": read_store(CONNECTIONS_JSON, {})})
-        if path == "/api-mappings":
-            return json_response(self, 200, {"mappings": read_store(MAPPINGS_JSON, [])})
-        return json_response(self, 404, {"ok": False, "error": "Not found"})
 
-    def do_POST(self) -> None:
-        path = urlparse(self.path).path
-        try:
-            body = read_json(self)
-            if path == "/launcher/save":
-                ports = body.get("ports") or suite_load_ports()
-                errors = suite_validate_ports(ports)
-                if errors:
-                    payload = suite_status_payload(suite_load_ports())
-                    payload.update({"ok": False, "message": "; ".join(errors)})
-                    return json_response(self, 200, payload)
-                suite_save_ports(ports)
-                payload = suite_status_payload(ports)
-                payload.update({"ok": True, "message": "Ports saved."})
-                return json_response(self, 200, payload)
-            if path == "/launcher/start":
-                ports = body.get("ports") or suite_load_ports()
-                include_portal = bool(body.get("include_portal", False))
-                previous_ports = suite_load_ports()
-                suite_stop_services(previous_ports, include_portal=False)
-                if ports != previous_ports:
-                    suite_stop_services(ports, include_portal=False)
-                ok, msg = suite_start_services(ports, include_portal=include_portal, open_browser_flag=False)
-                payload = suite_status_payload(ports)
-                payload.update({"ok": ok, "message": f"Old simulator services closed. {msg}"})
-                return json_response(self, 200, payload)
-            if path == "/launcher/open-app":
-                ports = body.get("ports") or suite_load_ports()
-                suite_save_ports(ports)
-                ok = suite_open_app_window(f"http://localhost:{ports['portal_port']}")
-                payload = suite_status_payload(ports)
-                payload.update({"ok": True, "message": "Application window requested." if ok else "Default browser opened because Edge/Chrome app mode was not found."})
-                return json_response(self, 200, payload)
-            if path == "/logs/clear":
-                suite_clear_log()
-                return json_response(self, 200, suite_logs_payload())
-            if path == "/launcher/stop":
-                ports = body.get("ports") or suite_load_ports()
-                include_portal = bool(body.get("include_portal", False))
-                if include_portal:
-                    helper_py = str(SUITE_VENV_PYW if SUITE_VENV_PYW.exists() else SUITE_VENV_PY)
-                    subprocess.Popen([helper_py, str(ROOT / "stop_hidden.py")], cwd=str(ROOT), creationflags=CREATE_NO_WINDOW)
-                    payload = suite_status_payload(ports)
-                    payload.update({"ok": True, "message": "Full stop requested. Portal may close."})
-                    return json_response(self, 200, payload)
-                ok, msg = suite_stop_services(ports, include_portal=False)
-                payload = suite_status_payload(ports)
-                payload.update({"ok": ok, "message": msg})
-                return json_response(self, 200, payload)
-            if path == "/mssql/test":
-                return json_response(self, 200, run_mssql("test", body))
-            if path == "/mssql/write-current":
-                rows = current_industrial_rows()
-                if not rows:
-                    return json_response(self, 200, {"ok": False, "error": "No current values. Configure and start replay first."})
-                return json_response(self, 200, run_mssql("write", body, rows))
-            if path == "/mssql/list-databases":
-                return json_response(self, 200, run_mssql("list_databases", body))
-            if path == "/mssql/list-tables":
-                return json_response(self, 200, run_mssql("list_tables", body))
-            if path == "/connections/save":
-                write_store(CONNECTIONS_JSON, body)
-                return json_response(self, 200, {"ok": True, "connections": body})
-            if path == "/api-mappings/save":
-                mappings = read_store(MAPPINGS_JSON, [])
-                mappings = [m for m in mappings if m.get("endpoint_id") != body.get("endpoint_id")]
-                mappings.append(body)
-                write_store(MAPPINGS_JSON, mappings)
-                return json_response(self, 200, {"ok": True, "mappings": mappings})
-            return json_response(self, 404, {"ok": False, "error": "Not found"})
-        except Exception as exc:
-            return json_response(self, 500, {"ok": False, "error": str(exc)})
+@app.get("/suite/status")
+def suite_status() -> dict[str, Any]:
+    return {
+        "portal": {"ok": True, "port": PORT},
+        "industrial": get_service(f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/health"),
+        "api_studio": {"ok": False, "retired": True},
+    }
+
+
+@app.get("/launcher/config")
+def launcher_config() -> dict[str, Any]:
+    return suite_status_payload(suite_load_ports())
+
+
+@app.get("/logs")
+def logs(
+    limit: int = Query(default=300),
+    level: str = Query(default=""),
+    source: str = Query(default=""),
+    service: str = Query(default=""),
+    event: str = Query(default=""),
+    q: str = Query(default=""),
+) -> dict[str, Any]:
+    bounded_limit = max(50, min(limit, 1000))
+    return suite_logs_payload(
+        limit=bounded_limit,
+        level=level,
+        source=source,
+        service=service,
+        event=event,
+        query=q,
+    )
+
+
+@app.get("/connections")
+def connections() -> dict[str, Any]:
+    return {"connections": read_store(CONNECTIONS_JSON, {})}
+
+
+@app.get("/api-mappings")
+def api_mappings() -> dict[str, Any]:
+    return {"mappings": read_store(MAPPINGS_JSON, [])}
+
+
+def _body(value: dict[str, Any] | None) -> dict[str, Any]:
+    return value or {}
+
+
+@app.post("/launcher/save")
+def launcher_save(body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    payload = _body(body)
+    ports = payload.get("ports") or suite_load_ports()
+    errors = suite_validate_ports(ports)
+    if errors:
+        result = suite_status_payload(suite_load_ports())
+        result.update({"ok": False, "message": "; ".join(errors)})
+        return result
+    suite_save_ports(ports)
+    result = suite_status_payload(ports)
+    result.update({"ok": True, "message": "Ports saved."})
+    return result
+
+
+@app.post("/launcher/start")
+def launcher_start(body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    payload = _body(body)
+    ports = payload.get("ports") or suite_load_ports()
+    include_portal = bool(payload.get("include_portal", False))
+    previous_ports = suite_load_ports()
+    suite_stop_services(previous_ports, include_portal=False)
+    if ports != previous_ports:
+        suite_stop_services(ports, include_portal=False)
+    ok, message = suite_start_services(ports, include_portal=include_portal, open_browser_flag=False)
+    result = suite_status_payload(ports)
+    result.update({"ok": ok, "message": f"Old simulator services closed. {message}"})
+    return result
+
+
+@app.post("/launcher/open-app")
+def launcher_open_app(body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    payload = _body(body)
+    ports = payload.get("ports") or suite_load_ports()
+    suite_save_ports(ports)
+    opened_app_mode = suite_open_app_window(f"http://localhost:{ports['portal_port']}")
+    result = suite_status_payload(ports)
+    result.update({
+        "ok": True,
+        "message": "Application window requested." if opened_app_mode else "Default browser opened because Edge/Chrome app mode was not found.",
+    })
+    return result
+
+
+@app.post("/logs/clear")
+def logs_clear() -> dict[str, Any]:
+    suite_clear_log()
+    return suite_logs_payload()
+
+
+@app.post("/launcher/stop")
+def launcher_stop(body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    payload = _body(body)
+    ports = payload.get("ports") or suite_load_ports()
+    include_portal = bool(payload.get("include_portal", False))
+    if include_portal:
+        helper_python = str(SUITE_VENV_PYW if SUITE_VENV_PYW.exists() else SUITE_VENV_PY)
+        subprocess.Popen(
+            [helper_python, str(ROOT / "stop_hidden.py")],
+            cwd=str(ROOT),
+            creationflags=CREATE_NO_WINDOW,
+        )
+        result = suite_status_payload(ports)
+        result.update({"ok": True, "message": "Full stop requested. Portal may close."})
+        return result
+    ok, message = suite_stop_services(ports, include_portal=False)
+    result = suite_status_payload(ports)
+    result.update({"ok": ok, "message": message})
+    return result
+
+
+@app.post("/mssql/test")
+def mssql_test(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    return run_mssql("test", body)
+
+
+@app.post("/mssql/write-current")
+def mssql_write_current(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    rows = current_industrial_rows()
+    if not rows:
+        return {"ok": False, "error": "No current values. Configure and start replay first."}
+    return run_mssql("write", body, rows)
+
+
+@app.post("/mssql/list-databases")
+def mssql_list_databases(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    return run_mssql("list_databases", body)
+
+
+@app.post("/mssql/list-tables")
+def mssql_list_tables(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    return run_mssql("list_tables", body)
+
+
+@app.post("/connections/save")
+def connections_save(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    write_store(CONNECTIONS_JSON, body)
+    return {"ok": True, "connections": body}
+
+
+@app.post("/api-mappings/save")
+def api_mappings_save(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    mappings = read_store(MAPPINGS_JSON, [])
+    mappings = [item for item in mappings if item.get("endpoint_id") != body.get("endpoint_id")]
+    mappings.append(body)
+    write_store(MAPPINGS_JSON, mappings)
+    return {"ok": True, "mappings": mappings}
 
 
 def main() -> None:
+    import uvicorn
+
     print(f"Portal: http://127.0.0.1:{PORT}")
     print(f"Industrial simulator: http://127.0.0.1:{INDUSTRIAL_PORT}")
-    print("API Studio: disabled")
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
 
 
 if __name__ == "__main__":
