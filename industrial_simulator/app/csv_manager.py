@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import csv
 import os
-import sys
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Iterable
+
 from fastapi import UploadFile
-from .models import CsvMetadata, CsvFileRecord, CsvPreviewResponse, TagMapping
-from .type_inference import infer_types, sanitize_tag_name, is_default_disabled_column
+
+from .models import CsvFileRecord, CsvMetadata, CsvPreviewResponse, TagMapping
+from .type_inference import infer_types, sanitize_tag_name
+
 
 def get_base_dir() -> Path:
     if os.environ.get("ITS_BASE_DIR"):
@@ -16,6 +19,7 @@ def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
+
 
 ROOT = get_base_dir()
 UPLOAD_DIR = ROOT / "uploads"
@@ -204,7 +208,7 @@ def default_tag_mappings(columns: list[str], inferred_types: dict[str, str], pre
     for col in columns:
         tag = sanitize_tag_name(col)
         mappings.append(TagMapping(
-            enabled=not is_default_disabled_column(col),
+            enabled=True,
             csv_column=col,
             tag_name=tag,
             node_id=f"{prefix}.{tag}",
@@ -227,19 +231,20 @@ def scan_rows(path: Path, preview_rows: int = 10, type_sample_size: int = 100) -
         columns = [c.strip() for c in reader.fieldnames]
         if len(set(columns)) != len(columns):
             raise ValueError("File has duplicate columns.")
-        preview: list[dict[str, str]] = []
+        preview_rows_data: list[dict[str, str]] = []
         type_sample: list[dict[str, str]] = []
         row_count = 0
         for row in reader:
             normalized = {col: row.get(col, "") for col in columns}
             if row_count < preview_rows:
-                preview.append(normalized)
+                preview_rows_data.append(normalized)
             if row_count < type_sample_size:
                 type_sample.append(normalized)
             row_count += 1
-    return columns, preview, type_sample, row_count
+    return columns, preview_rows_data, type_sample, row_count
 
 
 def _mtime(path: Path) -> str:
     from datetime import datetime, timezone
+
     return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat().replace("+00:00", "Z")
