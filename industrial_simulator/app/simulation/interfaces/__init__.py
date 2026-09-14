@@ -3,6 +3,7 @@ from .http import HttpTarget
 from .memory import MemoryTarget
 from .mqtt import MqttTarget
 from .opcua import InterfaceHostManager, OpcUaTarget
+from .rest_api import RestApiTarget
 from .sql_server import SqlServerTarget
 
 __all__ = [
@@ -11,6 +12,7 @@ __all__ = [
     "MemoryTarget",
     "MqttTarget",
     "OpcUaTarget",
+    "RestApiTarget",
     "SqlServerTarget",
     "create_target",
 ]
