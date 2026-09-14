@@ -7,10 +7,8 @@ from threading import Lock
 from typing import Any
 
 try:
-    from asyncua import ua  # type: ignore
     from asyncua.common.callback import CallbackType  # type: ignore
 except Exception:  # pragma: no cover
-    ua = None
     CallbackType = None
 
 
@@ -28,7 +26,13 @@ def _status_text(value: Any) -> str:
 
 
 class OpcUaDiagnostics:
-    """Small observability layer for asyncua callbacks and external sessions."""
+    """Small observability layer for asyncua callbacks and external sessions.
+
+    All access to asyncua private session/subscription fields is intentionally
+    isolated here. The snapshot reports capability availability so a future
+    asyncua change degrades diagnostics explicitly rather than looking like
+    "zero connected clients".
+    """
 
     def __init__(self, recent_limit: int = 100) -> None:
         self._lock = Lock()
@@ -104,18 +108,23 @@ class OpcUaDiagnostics:
         iserver.subscribe_server_callback(CallbackType.PostWrite, self.on_post_write)
         return True
 
-    def _sessions(self, server: Any) -> list[dict[str, Any]]:
+    def _sessions(self, server: Any) -> tuple[list[dict[str, Any]], bool, bool]:
         iserver = getattr(server, "iserver", None)
-        sessions = getattr(iserver, "_external_sessions", {}) if iserver is not None else {}
+        if iserver is None or not hasattr(iserver, "_external_sessions"):
+            return [], False, False
+
+        sessions = getattr(iserver, "_external_sessions", {})
         values = list(sessions.values()) if isinstance(sessions, dict) else []
         now = time.monotonic()
         result = []
-        subscriptions = getattr(getattr(iserver, "subscription_service", None), "subscriptions", {}) if iserver else {}
+        subscription_service = getattr(iserver, "subscription_service", None)
+        subscriptions_available = bool(subscription_service is not None and hasattr(subscription_service, "subscriptions"))
+        subscriptions = getattr(subscription_service, "subscriptions", {}) if subscriptions_available else {}
         for session in values:
             state = getattr(getattr(session, "state", None), "name", str(getattr(session, "state", "unknown")))
             last_activity = getattr(session, "_last_activity", None)
-            sub_count = 0
-            if isinstance(subscriptions, dict):
+            sub_count: int | None = None
+            if subscriptions_available and isinstance(subscriptions, dict):
                 sid = getattr(session, "session_id", None)
                 sub_count = sum(1 for sub in subscriptions.values() if getattr(sub, "session_id", None) == sid)
             result.append({
@@ -127,15 +136,20 @@ class OpcUaDiagnostics:
                 "last_activity_age_seconds": round(max(0.0, now - last_activity), 3) if isinstance(last_activity, (int, float)) else None,
                 "subscriptions": sub_count,
             })
-        return result
+        return result, True, subscriptions_available
 
     def snapshot(self, server: Any) -> dict[str, Any]:
-        sessions = self._sessions(server)
+        sessions, session_introspection_available, subscription_introspection_available = self._sessions(server)
         with self._lock:
             return {
                 "started_at": self.started_at,
-                "connected_clients": sum(1 for session in sessions if session["state"] == "Activated"),
-                "session_count": len(sessions),
+                "session_introspection_available": session_introspection_available,
+                "subscription_introspection_available": subscription_introspection_available,
+                "connected_clients": (
+                    sum(1 for session in sessions if session["state"] == "Activated")
+                    if session_introspection_available else None
+                ),
+                "session_count": len(sessions) if session_introspection_available else None,
                 "sessions": sessions,
                 "read_requests": self.read_requests,
                 "read_nodes": self.read_nodes,
