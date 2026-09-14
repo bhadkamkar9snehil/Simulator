@@ -106,6 +106,42 @@ def test_api_target_rejects_missing_required_header_and_counts_client_error() ->
         asyncio.run(target.stop())
 
 
+def test_api_target_requires_query_and_body_values() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="request-contract",
+        kind="api",
+        config={
+            "method": "POST",
+            "path": "/quality",
+            "response_mode": "template",
+            "response_template": '{"accepted":true}',
+            "required_request_values": "query.site=plant-a\nbody.type=result\nbody.sample_id",
+            "request_error_status": 422,
+        },
+    ))
+    asyncio.run(target.start("sim-api-test", "API test", []))
+    try:
+        missing = _client().post("/sim-api/quality?site=plant-a", json={"type": "result"})
+        assert missing.status_code == 422
+        wrong = _client().post(
+            "/sim-api/quality?site=plant-b",
+            json={"type": "result", "sample_id": "S-1"},
+        )
+        assert wrong.status_code == 422
+        accepted = _client().post(
+            "/sim-api/quality?site=plant-a",
+            json={"type": "result", "sample_id": "S-1"},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json() == {"accepted": True}
+        details = target.status().details
+        assert details["request_count"] == 3
+        assert details["client_error_count"] == 2
+        assert details["success_count"] == 1
+    finally:
+        asyncio.run(target.stop())
+
+
 def test_api_target_returns_configured_no_data_status_before_first_frame() -> None:
     target = RestApiTarget(TargetBinding(
         target_id="empty-api",
@@ -212,6 +248,35 @@ def test_history_match_selects_retained_frame_without_moving_simulation() -> Non
         assert details["request_count"] == 2
         assert details["success_count"] == 1
         assert details["client_error_count"] == 1
+    finally:
+        asyncio.run(target.stop())
+
+
+def test_response_headers_can_use_request_and_selected_frame_tokens() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="header-template",
+        kind="api",
+        config={
+            "method": "GET",
+            "path": "/orders/{order_id}",
+            "selection_mode": "history_match",
+            "match_frame": "values.OrderId",
+            "match_request": "path.order_id",
+            "response_mode": "record",
+            "fields": "OrderId",
+            "include_system_fields": False,
+            "response_headers": "Location: /orders/${path.order_id}\nETag: seq-${meta.sequence}",
+        },
+    ))
+    asyncio.run(target.start("sim-api-test", "API test", []))
+    asyncio.run(target.publish(_order_frame(4, "A-4", 20.0)))
+    asyncio.run(target.publish(_order_frame(5, "A-5", 21.0)))
+    try:
+        response = _client().get("/sim-api/orders/A-4")
+        assert response.status_code == 200
+        assert response.headers["Location"] == "/orders/A-4"
+        assert response.headers["ETag"] == "seq-4"
+        assert response.json()["OrderId"] == "A-4"
     finally:
         asyncio.run(target.stop())
 
