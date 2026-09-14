@@ -4,7 +4,7 @@ import ast
 import datetime as dt
 import json
 import math
-from dataclasses import dataclass
+import uuid
 from typing import Any
 
 try:
@@ -13,7 +13,6 @@ except Exception:  # pragma: no cover
     ua = None
 
 
-# Keep conversion policy isolated from replay/orchestration (Ponytail: one reason to change).
 SCALAR_TYPES = {
     "Boolean", "SByte", "Byte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
     "Float", "Double", "String", "DateTime", "Guid", "ByteString", "XmlElement", "NodeId",
@@ -72,7 +71,7 @@ def _nullish(value: Any) -> bool:
         return True
     if isinstance(value, float) and math.isnan(value):
         return True
-    if isinstance(value, str) and value.strip().lower() in {"", "null", "none", "nan", "nat"}:
+    if isinstance(value, str) and value.strip().lower() in {"null", "none", "nan", "nat"}:
         return True
     return False
 
@@ -96,8 +95,10 @@ def coerce_scalar(data_type: str, value: Any) -> Any:
     if data_type == "Boolean":
         if isinstance(value, str):
             lowered = value.strip().lower()
-            if lowered in {"true", "1", "yes", "on"}: return True
-            if lowered in {"false", "0", "no", "off"}: return False
+            if lowered in {"true", "1", "yes", "on"}:
+                return True
+            if lowered in {"false", "0", "no", "off"}:
+                return False
             raise ValueError(f"Invalid Boolean value: {value!r}")
         return bool(value)
     if data_type in INTEGER_RANGES:
@@ -112,18 +113,29 @@ def coerce_scalar(data_type: str, value: Any) -> Any:
         return str(value)
     if data_type == "DateTime":
         return _datetime(value)
+    if data_type == "Guid":
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
     if ua is None:
         return value
-    if data_type == "Guid": return ua.Guid(str(value))
     if data_type == "ByteString":
-        if isinstance(value, bytes): return value
-        if isinstance(value, bytearray): return bytes(value)
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
         return str(value).encode("utf-8")
-    if data_type == "XmlElement": return ua.XmlElement(str(value))
-    if data_type == "NodeId": return ua.NodeId.from_string(str(value))
-    if data_type == "QualifiedName": return ua.QualifiedName.from_string(str(value))
-    if data_type == "LocalizedText": return ua.LocalizedText(str(value))
-    if data_type == "StatusCode": return status_code(value)
+    if data_type == "XmlElement":
+        return ua.XmlElement(str(value))
+    if data_type == "NodeId":
+        return value if isinstance(value, ua.NodeId) else ua.NodeId.from_string(str(value))
+    if data_type == "QualifiedName":
+        return value if isinstance(value, ua.QualifiedName) else ua.QualifiedName.from_string(str(value))
+    if data_type == "LocalizedText":
+        if isinstance(value, ua.LocalizedText):
+            return value
+        from_string = getattr(ua.LocalizedText, "from_string", None)
+        return from_string(str(value)) if from_string else ua.LocalizedText(str(value))
+    if data_type == "StatusCode":
+        return status_code(value)
     raise ValueError(f"Unsupported OPC UA datatype: {data_type}")
 
 
@@ -162,6 +174,8 @@ def status_code(value: Any = "Good") -> Any:
     if isinstance(value, int):
         return ua.StatusCode(value)
     text = str(value or "Good").strip()
+    if text.isdigit() or (text.startswith("0x") and len(text) > 2):
+        return ua.StatusCode(int(text, 0))
     alias = QUALITY_ALIASES.get(text.lower(), text)
     code = getattr(ua.StatusCodes, alias, None)
     if code is None:
@@ -173,8 +187,7 @@ def data_value(data_type: str, value: Any, quality: Any = "Good", source_timesta
     coerced = coerce_value(data_type, value)
     if ua is None:
         return {"value": coerced, "quality": quality, "source_timestamp": source_timestamp}
-    variant = ua.Variant(coerced, variant_type(data_type))
-    dv = ua.DataValue(variant)
+    dv = ua.DataValue(ua.Variant(coerced, variant_type(data_type)))
     dv.StatusCode = status_code(quality)
     if source_timestamp is not None and not _nullish(source_timestamp):
         dv.SourceTimestamp = _datetime(source_timestamp)
@@ -183,10 +196,29 @@ def data_value(data_type: str, value: Any, quality: Any = "Good", source_timesta
 
 def default_value(data_type: str) -> Any:
     base, is_array = split_type(data_type)
-    if is_array: return []
-    if base == "Boolean": return False
-    if base in INTEGER_RANGES: return 0
-    if base in {"Float", "Double"}: return 0.0
-    if base == "DateTime": return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
-    if base == "ByteString": return b""
+    if is_array:
+        return []
+    if base == "Boolean":
+        return False
+    if base in INTEGER_RANGES:
+        return 0
+    if base in {"Float", "Double"}:
+        return 0.0
+    if base == "DateTime":
+        return dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+    if base == "Guid":
+        return uuid.UUID(int=0)
+    if base == "ByteString":
+        return b""
+    if ua is not None:
+        if base == "XmlElement":
+            return ua.XmlElement("")
+        if base == "NodeId":
+            return ua.NodeId()
+        if base == "QualifiedName":
+            return ua.QualifiedName()
+        if base == "LocalizedText":
+            return ua.LocalizedText("")
+        if base == "StatusCode":
+            return status_code("Good")
     return ""
