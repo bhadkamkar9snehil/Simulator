@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.simulation.interfaces.rest_api import RestApiTarget, api_registry, router
-from app.simulation.models import SignalValue, SimulationFrame, TargetBinding
+from app.simulation.models import ClockSpec, SignalValue, SimulationDefinition, SimulationFrame, SourceBinding, TargetBinding
+from app.simulation.runtime import SimulationManager
 
 
 def _frame(sequence: int, temperature: float) -> SimulationFrame:
@@ -151,3 +152,47 @@ def test_duplicate_live_method_and_path_are_rejected() -> None:
     finally:
         asyncio.run(first.stop())
         api_registry.remove("sim-two", "second")
+
+
+def test_simulation_manager_publishes_source_data_to_callable_api(tmp_path) -> None:
+    async def run() -> None:
+        manager = SimulationManager(tmp_path / "runtime.json")
+        definition = SimulationDefinition(
+            simulation_id="sim-api-e2e",
+            name="API end to end",
+            source=SourceBinding(
+                kind="inline",
+                config={"rows": [{"Temperature": 18.5}, {"Temperature": 19.25}]},
+            ),
+            clock=ClockSpec(mode="fixed_rate", frequency_hz=100.0),
+            loop_mode="loop_forever",
+            targets=[TargetBinding(
+                target_id="public-api",
+                kind="api",
+                config={
+                    "method": "GET",
+                    "path": "/plant/current",
+                    "response_mode": "record",
+                    "fields": "Temperature",
+                    "include_system_fields": False,
+                },
+            )],
+        )
+        await manager.create(definition)
+        await manager.start(definition.simulation_id)
+        for _ in range(100):
+            if manager.status(definition.simulation_id).emitted_count:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("Simulation did not publish an API frame.")
+
+        response = _client().get("/sim-api/plant/current")
+        assert response.status_code == 200
+        assert response.json()["Temperature"] in {18.5, 19.25}
+        status = manager.status(definition.simulation_id)
+        assert status.targets[0].kind == "api"
+        assert status.targets[0].details["request_count"] == 1
+        await manager.shutdown()
+
+    asyncio.run(run())
