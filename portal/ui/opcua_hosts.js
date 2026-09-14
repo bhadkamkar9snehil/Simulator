@@ -23,6 +23,18 @@ function memberControls(simulationId) {
   </div>`;
 }
 
+function bulkControls(host) {
+  const ids = (host.simulation_targets || []).map((member) => member.simulation_id).join(",");
+  if (!ids) return "";
+  const encoded = attr(ids);
+  return `<div class="panel-actions" style="margin-top:10px">
+    <button class="button compact secondary" data-opc-bulk-action="pause" data-simulation-ids="${encoded}">Pause all</button>
+    <button class="button compact secondary" data-opc-bulk-action="resume" data-simulation-ids="${encoded}">Resume all</button>
+    <button class="button compact secondary" data-opc-bulk-action="restart" data-simulation-ids="${encoded}">Restart all</button>
+    <button class="button compact danger" data-opc-bulk-action="stop" data-simulation-ids="${encoded}">Stop all</button>
+  </div>`;
+}
+
 function sharedMembers(host) {
   const members = host.simulation_targets || [];
   if (!members.length) return "";
@@ -51,6 +63,7 @@ function sharedHostCard(key, host) {
       <dt>Namespace</dt><dd>${esc(host.namespace_uri || "—")}</dd>
       <dt>Root</dt><dd>${esc(host.root_folder || "—")}</dd>
     </dl>
+    ${bulkControls(host)}
     ${sharedMembers(host)}
   </article>`;
 }
