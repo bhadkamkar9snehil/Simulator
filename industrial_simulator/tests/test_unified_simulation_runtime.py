@@ -6,7 +6,7 @@ from app.simulation.models import ClockSpec, SimulationDefinition, SourceBinding
 from app.simulation.runtime import SimulationManager
 
 
-def _inline_definition(simulation_id: str, start: int) -> SimulationDefinition:
+def _inline_definition(simulation_id: str, start: int, frequency_hz: float = 1000.0) -> SimulationDefinition:
     return SimulationDefinition(
         simulation_id=simulation_id,
         name=simulation_id,
@@ -20,7 +20,7 @@ def _inline_definition(simulation_id: str, start: int) -> SimulationDefinition:
                 ]
             },
         ),
-        clock=ClockSpec(mode="fixed_rate", frequency_hz=1000.0),
+        clock=ClockSpec(mode="fixed_rate", frequency_hz=frequency_hz),
         loop_mode="once",
         targets=[TargetBinding(target_id=f"{simulation_id}-memory", kind="memory")],
     )
@@ -33,6 +33,14 @@ async def _wait_completed(manager: SimulationManager, *simulation_ids: str) -> N
             return
         await asyncio.sleep(0.005)
     raise AssertionError(f"Simulations did not complete: {states}")
+
+
+async def _wait_position(manager: SimulationManager, simulation_id: str, minimum: int) -> None:
+    for _ in range(200):
+        if manager.status(simulation_id).source_position >= minimum:
+            return
+        await asyncio.sleep(0.005)
+    raise AssertionError(f"Simulation did not reach source position {minimum}")
 
 
 def test_multiple_simulations_run_independently(tmp_path) -> None:
@@ -53,6 +61,83 @@ def test_multiple_simulations_run_independently(tmp_path) -> None:
         assert right_snapshot["status"]["emitted_count"] == 3
         assert left_snapshot["frame"]["values"]["value"]["value"] == 12
         assert right_snapshot["frame"]["values"]["value"]["value"] == 102
+        await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_pause_seek_resume_preserves_independent_cursor(tmp_path) -> None:
+    async def run() -> None:
+        manager = SimulationManager(tmp_path / "runtime.json")
+        definition = _inline_definition("sim-seek", 10, frequency_hz=20.0)
+        await manager.create(definition)
+        await manager.start(definition.simulation_id)
+        await _wait_position(manager, definition.simulation_id, 1)
+        await manager.pause(definition.simulation_id)
+
+        paused = manager.status(definition.simulation_id)
+        assert paused.state == "paused"
+        await manager.seek(definition.simulation_id, 2)
+        assert manager.status(definition.simulation_id).source_position == 2
+
+        await manager.resume(definition.simulation_id)
+        await _wait_completed(manager, definition.simulation_id)
+        snapshot = manager.snapshot(definition.simulation_id)
+        assert snapshot["frame"]["values"]["value"]["value"] == 12
+        await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_cursor_change_requires_pause(tmp_path) -> None:
+    async def run() -> None:
+        manager = SimulationManager(tmp_path / "runtime.json")
+        definition = _inline_definition("sim-running-seek", 1, frequency_hz=5.0)
+        await manager.create(definition)
+        await manager.start(definition.simulation_id)
+        try:
+            await manager.seek(definition.simulation_id, 1)
+        except ValueError as exc:
+            assert "Pause the simulation" in str(exc)
+        else:
+            raise AssertionError("Seek while running should be rejected.")
+        await manager.stop(definition.simulation_id)
+        await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_reset_cursor_returns_to_configured_start(tmp_path) -> None:
+    async def run() -> None:
+        manager = SimulationManager(tmp_path / "runtime.json")
+        definition = _inline_definition("sim-reset", 20, frequency_hz=20.0)
+        definition.source.config["start_row"] = 1
+        await manager.create(definition)
+        await manager.start(definition.simulation_id)
+        await _wait_position(manager, definition.simulation_id, 2)
+        await manager.pause(definition.simulation_id)
+        await manager.reset_cursor(definition.simulation_id)
+        assert manager.status(definition.simulation_id).source_position == 1
+        await manager.stop(definition.simulation_id)
+        await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_restart_reopens_source_from_configured_start(tmp_path) -> None:
+    async def run() -> None:
+        manager = SimulationManager(tmp_path / "runtime.json")
+        definition = _inline_definition("sim-restart", 30)
+        await manager.create(definition)
+        await manager.start(definition.simulation_id)
+        await _wait_completed(manager, definition.simulation_id)
+        assert manager.status(definition.simulation_id).emitted_count == 3
+
+        restarted = await manager.restart(definition.simulation_id)
+        assert restarted.state == "running"
+        assert restarted.emitted_count == 0
+        await _wait_completed(manager, definition.simulation_id)
+        assert manager.status(definition.simulation_id).emitted_count == 3
         await manager.shutdown()
 
     asyncio.run(run())
