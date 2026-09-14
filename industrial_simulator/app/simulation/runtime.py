@@ -191,6 +191,7 @@ class SimulationInstance:
         self.direction = 1
         self.cursor_generation = 0
         self.fatal_error: str | None = None
+        self.holding_last = False
 
     async def start(self) -> SimulationStatus:
         async with self.lifecycle_lock:
@@ -291,6 +292,7 @@ class SimulationInstance:
             await source.seek(position)
             self.cursor_generation += 1
             self.direction = 1
+            self.holding_last = False
             self.clock.reset()
             self.last_frame = None
             self.last_source_position = source.position
@@ -306,6 +308,7 @@ class SimulationInstance:
         self.last_source_position = 0
         self.last_source_count = None
         self.direction = 1
+        self.holding_last = False
         self.cursor_generation += 1
         self.clock.reset()
         self.run_gate.set()
@@ -325,10 +328,17 @@ class SimulationInstance:
                     continue
                 if self.fatal_error:
                     raise RuntimeError(self.fatal_error)
+                if self.holding_last and self.last_frame is not None:
+                    await self.clock.wait(self.last_frame)
+                    continue
                 generation = self.cursor_generation
                 async with self.source_lock:
                     frame = await self._next_frame()
                 if frame is None:
+                    if self.definition.loop_mode == "hold_last" and self.last_frame is not None:
+                        self.holding_last = True
+                        await asyncio.gather(*(runner.drain() for runner in self.runners))
+                        continue
                     await asyncio.gather(*(runner.drain() for runner in self.runners))
                     self.state = "completed"
                     self.updated_at = utc_now_iso()
@@ -375,17 +385,15 @@ class SimulationInstance:
         if frame is not None:
             return frame
         mode = self.definition.loop_mode
-        if mode == "once":
+        if mode in {"once", "hold_last"}:
             return None
-        if mode == "hold_last":
-            return self.last_frame.model_copy(update={"timestamp": utc_now_iso()}) if self.last_frame else None
         if mode == "loop_forever":
             await source.seek(self.start_position)
             self.clock.reset()
             return await source.next_frame()
         count = source.count
         if count is None or count <= self.start_position + 1:
-            return self.last_frame.model_copy(update={"timestamp": utc_now_iso()}) if self.last_frame else None
+            return None
         self.direction = -1
         await source.seek(count - 2)
         return await source.next_frame()
