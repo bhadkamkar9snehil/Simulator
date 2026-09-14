@@ -54,6 +54,12 @@ SCHEMA = [
 ]
 
 
+def _fake_runtime(monkeypatch) -> None:
+    _FakeOpcUaServer.instances.clear()
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    monkeypatch.setattr(opcua_module, "Server", object())
+
+
 def _shared_binding(target_id: str = "opcua") -> TargetBinding:
     return TargetBinding(
         target_id=target_id,
@@ -71,8 +77,7 @@ def _shared_binding(target_id: str = "opcua") -> TargetBinding:
 
 
 def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) -> None:
-    _FakeOpcUaServer.instances.clear()
-    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    _fake_runtime(monkeypatch)
     manager = opcua_module.InterfaceHostManager()
 
     async def exercise() -> None:
@@ -115,8 +120,7 @@ def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) 
 
 
 def test_same_target_id_is_scoped_per_simulation(monkeypatch) -> None:
-    _FakeOpcUaServer.instances.clear()
-    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    _fake_runtime(monkeypatch)
     manager = opcua_module.InterfaceHostManager()
 
     async def exercise() -> None:
@@ -135,8 +139,7 @@ def test_same_target_id_is_scoped_per_simulation(monkeypatch) -> None:
 
 
 def test_shared_listener_rejects_conflicting_host_level_settings(monkeypatch) -> None:
-    _FakeOpcUaServer.instances.clear()
-    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    _fake_runtime(monkeypatch)
     manager = opcua_module.InterfaceHostManager()
 
     async def exercise() -> None:
@@ -157,8 +160,7 @@ def test_shared_listener_rejects_conflicting_host_level_settings(monkeypatch) ->
 
 
 def test_dedicated_targets_honor_bind_host(monkeypatch) -> None:
-    _FakeOpcUaServer.instances.clear()
-    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    _fake_runtime(monkeypatch)
     manager = opcua_module.InterfaceHostManager()
 
     async def exercise() -> None:
