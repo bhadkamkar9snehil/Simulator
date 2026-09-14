@@ -48,15 +48,16 @@ def test_shared_server_option_conflict_redacts_password_name() -> None:
     assert server_options_match(left, right) == ["credentials"]
 
 
-def test_parse_type_overrides_supports_common_opcua_scalar_types() -> None:
-    available = {"Count", "Speed", "When"}
+def test_parse_type_overrides_uses_canonical_scalar_and_array_types() -> None:
+    available = {"Count", "Speed", "When", "Samples"}
     assert parse_type_overrides(
-        "Count=UInt32\nSpeed=Float\nWhen=DateTime",
+        "Count=UInt32\nSpeed=Float\nWhen=DateTime\nSamples=UInt16[]",
         available,
     ) == {
         "Count": "UInt32",
         "Speed": "Float",
         "When": "DateTime",
+        "Samples": "UInt16[]",
     }
 
     with pytest.raises(ValueError, match="Unknown OPC UA type override signal"):
@@ -72,13 +73,14 @@ def test_parse_writable_signals_rejects_unknown_names() -> None:
         parse_writable_signals("Setpoint, Missing", available)
 
 
-def test_opcua_value_coercion_is_explicit() -> None:
+def test_opcua_value_coercion_delegates_to_canonical_type_layer() -> None:
     assert coerce_value("12", "UInt32") == 12
     assert coerce_value("2.5", "Float") == 2.5
     assert coerce_value("yes", "Boolean") is True
+    assert coerce_value("[1, 2, 65535]", "UInt16[]") == [1, 2, 65535]
     when = coerce_value("2026-09-14T12:30:00Z", "DateTime")
     assert isinstance(when, dt.datetime)
     assert when.tzinfo is not None
 
-    with pytest.raises(ValueError, match="cannot contain a negative"):
+    with pytest.raises(ValueError, match="outside"):
         coerce_value(-1, "UInt16")
