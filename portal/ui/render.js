@@ -1,6 +1,8 @@
 import {
   canEdit,
+  canMoveCursor,
   canPause,
+  canRestart,
   canResume,
   canStart,
   canStop,
@@ -125,6 +127,7 @@ export function renderDetailHeader(definition, status, dirty, isNew) {
         <button class="button primary" data-action="start" ${disabled(!canStart(status) && !isNew)}>Start</button>
         <button class="button secondary" data-action="pause" ${disabled(!canPause(status))}>Pause</button>
         <button class="button secondary" data-action="resume" ${disabled(!canResume(status))}>Resume</button>
+        ${isNew ? "" : `<button class="button secondary" data-action="restart" ${disabled(!canRestart(status))}>Restart</button>`}
         <button class="button danger" data-action="stop" ${disabled(!canStop(status))}>Stop</button>
         <button class="button danger" data-action="delete">${isNew ? "Discard" : "Delete"}</button>
       </div>
@@ -297,8 +300,10 @@ function renderPreview(preview) {
     </section>`;
 }
 
-function renderTiming({ definition, editable }) {
+function renderTiming({ definition, editable, status }) {
   const clock = definition.clock || {};
+  const cursorEnabled = canMoveCursor(status);
+  const sourceCount = status?.source_count;
   return `
     <div class="section-stack">
       ${!editable ? lockedNotice() : ""}
@@ -312,6 +317,18 @@ function renderTiming({ definition, editable }) {
           ${fieldSelect("Replay policy", "loop_mode", definition.loop_mode || "loop_forever", [["loop_forever", "Loop forever"], ["once", "Run once"], ["hold_last", "Hold last frame"], ["ping_pong", "Ping-pong"]], "span-4", editable)}
           <div class="field span-4"><span class="field-label">Autostart</span><div class="checkbox-line"><input id="autostart" type="checkbox" data-bind="autostart" ${checked(definition.autostart)} ${disabled(!editable)} /><label for="autostart">Start after runtime loads this definition</label></div></div>
         </div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><h3>Live cursor</h3><p>Pause before changing position. Queued target frames are drained before the cursor moves.</p></div></div>
+        <div class="panel-body">
+          <div class="form-grid">
+            ${readOnlyField("Current position", status?.source_position ?? 0, "span-3")}
+            ${readOnlyField("Available rows", sourceCount ?? "Unknown", "span-3")}
+            <div class="field span-3"><label for="seekPosition">Seek position</label><input id="seekPosition" type="number" min="0" ${sourceCount == null ? "" : `max="${attr(sourceCount)}"`} value="${attr(status?.source_position ?? 0)}" ${disabled(!cursorEnabled)} /><span class="help">Zero-based source position.</span></div>
+            <div class="field span-3"><span class="field-label">Cursor actions</span><div class="panel-actions"><button class="button secondary" data-action="reset-cursor" ${disabled(!cursorEnabled)}>Reset to start</button><button class="button primary" data-action="seek-cursor" ${disabled(!cursorEnabled)}>Seek</button></div></div>
+          </div>
+          ${cursorEnabled ? `<div class="notice info" style="margin-top:12px"><strong>Paused.</strong> Cursor changes are safe now and do not rebuild active target bindings.</div>` : `<div class="notice info" style="margin-top:12px">Pause a running simulation to enable cursor controls.</div>`}
+        </div>
       </section>
       <div class="notice info"><strong>Independent clock.</strong> Changing this simulation never changes the cursor or timing of another active simulation.</div>
     </div>`;
