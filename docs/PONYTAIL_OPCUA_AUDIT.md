@@ -17,10 +17,10 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 |---|---|---|---|---|
 | P0-01 | P0 | FIXED | Duplicate OPC UA datatype implementations (`opcua_types.py` and datatype logic in `opcua_support.py`) | `opcua_types.py` is now the single canonical OPC UA coercion/Variant/StatusCode/default implementation. `opcua_support.py` retains compatibility facades only. |
 | P0-02 | P0 | FIXED | Legacy and unified OPC UA server implementations had overlapping node/update ownership | `OpcUaTagServer` is the low-level host primitive. `UnifiedOpcUaServer` is now a thin security/auth + unified-model adapter; it no longer duplicates node creation/update/type behavior. |
-| P0-03 | P0 | IN PROGRESS | `DataType = str` weakens validation outside `TagMapping` | Validate supported scalar/array OPC UA types at shared model boundaries. |
-| P0-04 | P0 | OPEN | `type_inference.convert_value()` is still an execution-time conversion path | Type inference remains inference-only; OPC UA execution uses the canonical type layer. |
-| P0-05 | P0 | OPEN | StatusCode semantics differ between legacy and unified runtimes | Exact named/numeric quality semantics are shared; invalid quality never silently becomes Good. |
-| P1-01 | P1 | OPEN | `quality_column` and `source_timestamp_column` are configuration without complete replay behavior | Wire both through replay or remove them. |
+| P0-03 | P0 | FIXED | `DataType = str` weakened validation outside `TagMapping` | Unified `SignalValue`, `SignalDefinition`, and `SignalMapping` now validate scalar/array datatypes against the canonical registry at construction. |
+| P0-04 | P0 | FIXED | `type_inference.convert_value()` was an independent execution-time conversion path | Compatibility callers may still use the function, but it delegates all coercion semantics to `opcua_types.py`; type inference owns inference only. |
+| P0-05 | P0 | FIXED | StatusCode semantics differed between legacy and unified runtimes | Both surfaces now delegate to the canonical StatusCode conversion; tests cover exact named/numeric values and invalid-name rejection. |
+| P1-01 | P1 | IN PROGRESS | `quality_column` and `source_timestamp_column` are configuration without complete replay behavior | Wire both through replay or remove them. |
 | P1-02 | P1 | OPEN | Diagnostics UI creates a second `/api/status` polling loop | One status poll feeds all renderers. |
 | P1-03 | P1 | OPEN | Diagnostics JS dynamically manufactures markup and CSS | Static markup/styles; diagnostics module renders data only. |
 | P1-04 | P1 | OPEN | Rich diagnostics are attached to the legacy UI/status surface rather than unified interface-host view | Unified `/api/v2/interfaces` and Portal host UI become the canonical diagnostics surface. |
@@ -61,3 +61,21 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 - Retained only behavior that is genuinely specific to the unified host: per-target security/auth configuration and translation from unified models.
 - Attached the common diagnostics component in the secured unified start path as well.
 - Ownership rule: `OpcUaTagServer` owns OPC UA node/update mechanics; `InterfaceHostManager` owns shared/dedicated host lifecycle; `UnifiedOpcUaServer` is a narrow specialization rather than a parallel implementation.
+
+### P0-03 — validate unified datatype boundaries — `05fe725`, `df9d970`
+
+- Added canonical datatype validation to unified signal values, signal definitions and mapping overrides.
+- Unknown datatype names now fail while the definition/frame is being constructed instead of surfacing later inside an interface target.
+- Added focused coverage for scalar, array and invalid unified datatype values.
+
+### P0-04 — one coercion implementation — `fc51672`
+
+- Removed the old Double/Int64/Boolean/String conversion ladder from `type_inference.py`.
+- `convert_value()` remains temporarily as a compatibility facade but delegates to `opcua_types.coerce_value()`.
+- Ownership rule: inference determines a type name; the canonical OPC UA type layer performs conversion.
+
+### P0-05 — shared quality semantics — `1e1c833`
+
+- Added parity tests proving the support/unified compatibility surface and canonical layer resolve the same named StatusCodes.
+- Added exact numeric/hex StatusCode preservation tests.
+- Added regression tests proving unknown status names raise rather than becoming Good.
