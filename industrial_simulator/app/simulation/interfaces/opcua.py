@@ -386,37 +386,46 @@ async def _add_shared_group(
         )
         return
 
-    async def add_impl() -> tuple[int, Any, Any]:
+    async def add_impl() -> tuple[Any, dict[str, Any]]:
         server = host.server.server
         assert server is not None
         namespace_index = host.namespace_index
         if namespace_index is None:
             namespace_index = await server.register_namespace(host.namespace_uri)
+            host.namespace_index = namespace_index
         root = host.root_folder
         if root is None:
             root = await server.nodes.objects.add_folder(namespace_index, host.root_folder_name)
+            host.root_folder = root
         group_name = safe_name(f"{simulation_id}.{target_id}")
         folder = await root.add_folder(namespace_index, group_name)
-        for signal in schema:
-            logical_node_id = node_map[signal.name]
-            value = _initial_value(signal.data_type, signal.initial_value)
-            browse_name = safe_name(signal.name)
-            if ua is not None:
-                variable = await folder.add_variable(
-                    ua.NodeId(logical_node_id, namespace_index),
-                    browse_name,
-                    value,
-                )
-            else:  # pragma: no cover - real server implies ua is available
-                variable = await folder.add_variable(namespace_index, browse_name, value)
-            if signal.writable:
-                await variable.set_writable()
-            host.server.variables[logical_node_id] = variable
-        return namespace_index, root, folder
+        created: dict[str, Any] = {}
+        try:
+            for signal in schema:
+                logical_node_id = node_map[signal.name]
+                value = _initial_value(signal.data_type, signal.initial_value)
+                browse_name = safe_name(signal.name)
+                if ua is not None:
+                    variable = await folder.add_variable(
+                        ua.NodeId(logical_node_id, namespace_index),
+                        browse_name,
+                        value,
+                    )
+                else:  # pragma: no cover - real server implies ua is available
+                    variable = await folder.add_variable(namespace_index, browse_name, value)
+                if signal.writable:
+                    await variable.set_writable()
+                created[logical_node_id] = variable
+        except Exception:
+            try:
+                await folder.delete(recursive=True)
+            except Exception:
+                pass
+            raise
+        return folder, created
 
-    namespace_index, root, folder = await host.server._run_in_server_loop(add_impl())
-    host.namespace_index = namespace_index
-    host.root_folder = root
+    folder, created = await host.server._run_in_server_loop(add_impl())
+    host.server.variables.update(created)
     host.groups[member_key] = _SharedGroup(
         simulation_id,
         simulation_name,
