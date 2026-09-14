@@ -162,30 +162,6 @@ def workload_run_stop(run_id: str) -> dict:
         raise error_response(exc)
 
 
-@router.post("/jobs/{job_id}/pause")
-def job_pause(job_id: str) -> dict:
-    try:
-        return job_manager.pause_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/jobs/{job_id}/resume")
-def job_resume(job_id: str) -> dict:
-    try:
-        return job_manager.resume_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/jobs/{job_id}/cancel")
-def job_cancel(job_id: str) -> dict:
-    try:
-        return job_manager.cancel_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
 @router.get("/datasets")
 def datasets() -> dict:
     try:
