@@ -15,13 +15,15 @@ from app.opcua_support import (
     identity_tokens,
     initial_value,
     normalize_server_options,
+    opcua_timestamp,
     public_server_options,
     security_policy_types,
+    status_code,
     variant_type,
 )
 from app.models import ReplayConfig
 
-from ..models import SignalDefinition
+from ..models import SignalDefinition, utc_now_iso
 
 
 class UnifiedOpcUaServer(OpcUaTagServer):
@@ -151,6 +153,8 @@ class UnifiedOpcUaServer(OpcUaTagServer):
                     "signal": signal,
                     "data_type": data_type,
                     "writable": signal.name in writable_signals,
+                    "quality": "GOOD",
+                    "source_timestamp": None,
                 }
             return
 
@@ -172,6 +176,39 @@ class UnifiedOpcUaServer(OpcUaTagServer):
                 await var.set_writable()
             self.variables[node_id] = var
         _patch_asyncua_python314_property_annotations()
+
+    async def update_signals(
+        self,
+        values: dict[str, tuple[Any, str, str | None, str | None]],
+    ) -> None:
+        if not self.mock_mode and self.server is not None:
+            await self._run_in_server_loop(self._update_signals_impl(values))
+            return
+        await self._update_signals_impl(values)
+
+    async def _update_signals_impl(
+        self,
+        values: dict[str, tuple[Any, str, str | None, str | None]],
+    ) -> None:
+        for node_id, (value, data_type, quality, source_timestamp) in values.items():
+            var = self.variables.get(node_id)
+            if var is None:
+                continue
+            typed = coerce_value(value, data_type)
+            timestamp = opcua_timestamp(source_timestamp)
+            if self.mock_mode:
+                var["value"] = typed
+                var["data_type"] = data_type
+                var["quality"] = quality or "GOOD"
+                var["source_timestamp"] = timestamp
+                continue
+            data_value = ua.DataValue(
+                ua.Variant(typed, variant_type(data_type)),
+                StatusCode=status_code(quality),
+                SourceTimestamp=timestamp,
+                ServerTimestamp=opcua_timestamp(utc_now_iso()),
+            )
+            await var.write_value(data_value)
 
     async def _configure_tags_impl(self, config: ReplayConfig) -> None:
         data_types = {tag.tag_name: tag.data_type for tag in config.tags if tag.enabled}
@@ -198,15 +235,11 @@ class UnifiedOpcUaServer(OpcUaTagServer):
         )
 
     async def _update_values_impl(self, values: dict[str, tuple[Any, str]]) -> None:
-        for node_id, (value, data_type) in values.items():
-            var = self.variables.get(node_id)
-            if var is None:
-                continue
-            typed = coerce_value(value, data_type)
-            if self.mock_mode:
-                var["value"] = typed
-            else:
-                await var.write_value(typed, varianttype=variant_type(data_type))
+        converted = {
+            node_id: (value, data_type, "GOOD", None)
+            for node_id, (value, data_type) in values.items()
+        }
+        await self._update_signals_impl(converted)
 
     def get_status(self) -> dict[str, Any]:
         base = super().get_status()
