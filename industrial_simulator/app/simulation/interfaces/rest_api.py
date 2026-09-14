@@ -21,6 +21,7 @@ _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _RESPONSE_MODES = {"values", "frame", "record", "history", "template"}
 _SELECTION_MODES = {"current", "history_match"}
 _BODY_MODES = {"json", "text", "empty"}
+_ERROR_MODES = {"default", "json", "text", "empty"}
 _HISTORY_ORDERS = {"oldest_first", "newest_first"}
 _TOKEN_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
 _SEGMENT_PARAM_RE = re.compile(r"^\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -153,6 +154,7 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
     response_mode = _choice(config, "response_mode", "values", _RESPONSE_MODES, "response mode")
     selection_mode = _choice(config, "selection_mode", "current", _SELECTION_MODES, "selection mode")
     body_mode = _choice(config, "body_mode", "json", _BODY_MODES, "body mode")
+    error_mode = _choice(config, "error_mode", "default", _ERROR_MODES, "error mode")
     history_order = _choice(config, "history_order", "oldest_first", _HISTORY_ORDERS, "history order")
     status_code, empty_status_code, not_found_status, request_error_status = _status_codes(config)
     delay_ms = _bounded_int(config, "delay_ms", 0, 0, 300_000)
@@ -175,6 +177,8 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
         "selection_mode": selection_mode,
         "body_mode": body_mode,
         "media_type": str(config.get("media_type", "")).strip() or None,
+        "error_mode": error_mode,
+        "error_media_type": str(config.get("error_media_type", "")).strip() or None,
         "status_code": status_code,
         "empty_status_code": empty_status_code,
         "not_found_status": not_found_status,
@@ -194,6 +198,8 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
         "required_request_values": _parse_required_values(config.get("required_request_values")),
         "response_template": _parse_template(config.get("response_template")),
         "text_template": str(config.get("text_template", "")),
+        "error_template": _parse_template(config.get("error_template", '{"error":"${error.message}","status":"${error.status}"}')),
+        "error_text_template": str(config.get("error_text_template", "${error.status} ${error.message}")),
         "match_frame": match_frame,
         "match_request": match_request,
     }
@@ -209,6 +215,8 @@ class ApiProjection:
     selection_mode: str
     body_mode: str
     media_type: str | None
+    error_mode: str
+    error_media_type: str | None
     status_code: int
     empty_status_code: int
     not_found_status: int
@@ -224,6 +232,8 @@ class ApiProjection:
     required_request_values: list[tuple[str, str | None]]
     response_template: Any
     text_template: str
+    error_template: Any
+    error_text_template: str
     history_size: int
     history_order: str
     default_page_size: int
@@ -455,6 +465,19 @@ def _request_scope(frame: SimulationFrame | None, path_params: dict[str, str], q
     }
 
 
+def _error_scope(
+    projection: ApiProjection,
+    path_params: dict[str, str],
+    query: dict[str, str],
+    body: Any,
+    exc: HTTPException,
+) -> dict[str, Any]:
+    return {
+        **_request_scope(projection.current, path_params, query, body),
+        "error": {"status": exc.status_code, "message": str(exc.detail)},
+    }
+
+
 def _selected_frame(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> SimulationFrame | None:
     if projection.selection_mode == "current" or projection.response_mode == "history":
         return projection.current
@@ -548,7 +571,7 @@ def _response_headers(
 
 
 def _bodyless_status(status_code: int) -> bool:
-    return status_code < 200 or status_code in {204, 304}
+    return status_code < 200 or status_code in {204, 205, 304}
 
 
 def _response(projection: ApiProjection, request_method: str, path_params: dict[str, str], query: dict[str, str], body: Any) -> Response:
@@ -568,6 +591,37 @@ def _response(projection: ApiProjection, request_method: str, path_params: dict[
         status_code=projection.status_code,
         headers=headers,
         media_type=projection.media_type or "application/json",
+    )
+
+
+def _error_response(
+    projection: ApiProjection,
+    path_params: dict[str, str],
+    query: dict[str, str],
+    body: Any,
+    exc: HTTPException,
+) -> Response:
+    scope = _error_scope(projection, path_params, query, body, exc)
+    headers = dict(exc.headers or {})
+    for name, value in projection.response_headers.items():
+        rendered = _render_template(value, scope)
+        headers[name] = "" if rendered is None else str(rendered)
+    if projection.error_mode == "empty" or _bodyless_status(exc.status_code):
+        return Response(status_code=exc.status_code, headers=headers)
+    if projection.error_mode == "text":
+        rendered = _render_template(projection.error_text_template, scope)
+        return Response(
+            content="" if rendered is None else str(rendered),
+            status_code=exc.status_code,
+            headers=headers,
+            media_type=projection.error_media_type or "text/plain",
+        )
+    payload = _render_template(projection.error_template, scope)
+    return JSONResponse(
+        content=payload,
+        status_code=exc.status_code,
+        headers=headers,
+        media_type=projection.error_media_type or "application/json",
     )
 
 
@@ -592,11 +646,12 @@ async def _dispatch(request: Request, request_path: str) -> Response:
     projection.request_count += 1
     projection.last_request_at = _utc_now_iso()
     status_code = 500
+    body: Any = None
+    query = dict(request.query_params)
     try:
         for name, expected in projection.required_headers.items():
             if request.headers.get(name) != expected:
                 raise HTTPException(status_code=401, detail=f"Required request header missing or invalid: {name}")
-        body: Any = None
         if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
             raw = await request.body()
             if raw:
@@ -604,7 +659,6 @@ async def _dispatch(request: Request, request_path: str) -> Response:
                     body = json.loads(raw)
                 except json.JSONDecodeError:
                     body = raw.decode("utf-8", errors="replace")
-        query = dict(request.query_params)
         _require_request_values(projection, path_params, query, body)
         delay = _request_delay_seconds(projection)
         if delay:
@@ -614,7 +668,9 @@ async def _dispatch(request: Request, request_path: str) -> Response:
         return response
     except HTTPException as exc:
         status_code = exc.status_code
-        raise
+        if projection.error_mode == "default":
+            raise
+        return _error_response(projection, path_params, query, body, exc)
     finally:
         projection.record_request(status_code, (time.perf_counter() - started) * 1000.0)
 
