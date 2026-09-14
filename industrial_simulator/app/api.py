@@ -4,7 +4,7 @@ import logging
 import time
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from app.models import ConvertDatasetRequest, GenerateJobRequest, GenerateRequest, RegisterDatasetRequest, ReplayConfig, ReplayFilesConfig, SavedConfig, VideoJobRequest, WorkloadRunRequest
+from app.models import GenerateJobRequest, GenerateRequest, RegisterDatasetRequest, ReplayConfig, ReplayFilesConfig, SavedConfig, VideoJobRequest, WorkloadRunRequest
 from app import csv_manager, config_store, dataset_manager, job_manager
 from app.enterprise_generation import start_generate_job
 from app.video_engine import start_video_job
@@ -162,46 +162,6 @@ def workload_run_stop(run_id: str) -> dict:
         raise error_response(exc)
 
 
-@router.post("/jobs/{job_id}/pause")
-def job_pause(job_id: str) -> dict:
-    try:
-        return job_manager.pause_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/jobs/{job_id}/resume")
-def job_resume(job_id: str) -> dict:
-    try:
-        return job_manager.resume_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/jobs/{job_id}/cancel")
-def job_cancel(job_id: str) -> dict:
-    try:
-        return job_manager.cancel_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/jobs/{job_id}/retry")
-def job_retry(job_id: str) -> dict:
-    try:
-        return job_manager.update_job(job_id, message="Retry requested. Retry orchestration is not available for this job type yet.").model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/jobs/{job_id}/cleanup")
-def job_cleanup(job_id: str) -> dict:
-    try:
-        return job_manager.cleanup_job(job_id).model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
 @router.get("/datasets")
 def datasets() -> dict:
     try:
@@ -247,16 +207,6 @@ def dataset_scan(dataset_id: str) -> dict:
 
         job_manager.run_background(job.job_id, run_scan)
         return job.model_dump()
-    except Exception as exc:
-        raise error_response(exc)
-
-
-@router.post("/datasets/{dataset_id}/convert")
-def dataset_convert(dataset_id: str, request: ConvertDatasetRequest) -> dict:
-    try:
-        job = job_manager.create_job(f"Convert {dataset_id}", "convert_dataset", dataset_id=dataset_id)
-        job_manager.mark_failed(job.job_id, "Dataset conversion scaffolding is present, but CSV/JSONL to Parquet conversion requires the pyarrow wheelhouse package before execution.")
-        return job_manager.get_job(job.job_id).model_dump()
     except Exception as exc:
         raise error_response(exc)
 
@@ -311,8 +261,6 @@ def csv_preview(filename: str, source: str = Query("generated"), limit: int = Qu
         return csv_manager.preview(filename, source, limit).model_dump()
     except Exception as exc:
         raise error_response(exc)
-
-
 
 
 @router.post("/csv/files/{filename}/load")
@@ -414,8 +362,6 @@ async def replay_stop() -> dict:
         return result
     except Exception as exc:
         raise error_response(exc)
-
-
 
 
 @router.post("/replay/start-opcua")

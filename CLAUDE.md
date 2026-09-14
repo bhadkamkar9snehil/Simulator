@@ -1,134 +1,182 @@
-# Simulator — Codebase Knowledge Base
+# Simulator — Engineering Knowledge Base
 
-> Maintained for future agents. Update this file whenever you learn something new about the codebase.
+This file is guidance for humans and coding agents working in this repository. It describes the current architecture and the rules for evolving it. It must be updated when those facts change.
 
----
+## Authoritative product direction
 
-## Quick Start
-- Single entrypoint: `RUN_SIMULATOR.bat` (double-click or run from terminal)
-- Portal UI: http://localhost:8001
-- Bundled Python runtime: `runtime/python/python.exe` (ships in git, no separate install)
-- Setup: `irm https://raw.githubusercontent.com/bhadkamkar9snehil/Simulator/main/setup_simulator.ps1 | iex`
+Read these before architectural work:
 
----
+1. `docs/UNIFIED_SIMULATOR_REQUIREMENTS.md` — normative product and architecture requirements.
+2. `docs/CURRENT_STATE_AND_COMPLEXITY_BASELINE.md` — migration/technical-debt baseline; this document is intentionally temporary and should shrink as debt is removed.
+3. `docs/UNIFIED_RUNTIME_IMPLEMENTATION.md` — current implementation status for the new runtime.
 
-## Architecture
+The product direction is one unified Simulator capable of running many independent or coordinated Simulation Instances concurrently. Each instance owns its source, clock, cursor, mapping, lifecycle, and target bindings. Sources and targets must not be coupled to protocol combinations such as `opcua`, `mqtt`, or `both`.
 
-Three services, started together by `suite_runtime.py`:
+### Primary product focus
 
-| Service | Port | Role |
-|---|---|---|
-| `industrial_simulator` | 8000 | Tag data replay — reads CSV, publishes over MQTT + OPC UA |
-| `api_studio` | 5050 | REST API — simulator control and data access |
-| `portal` | 8001 | Web UI — the ONLY user-facing surface |
+The primary product objective is **end-to-end OPC UA simulation of many concurrent simulations serving many targets**.
 
-`suite_runtime.py` orchestrates startup, port assignment, environment setup, and health checks.
+The most important user workflow is:
 
----
-
-## Key Files
-
-| File | Role |
-|---|---|
-| `suite_runtime.py` | Orchestrator — `ensure-env`, `start-hidden`, `save-ports-from-env` subcommands; DEFAULT_PORTS has 5 keys |
-| `portal/portal_app.py` | FastAPI serving portal at port 8001; manages start/stop via suite_runtime imports |
-| `portal/simulator_proto.html` | Monolithic 85 KB single-page UI; served at `/` by the FastAPI frontend |
-| `industrial_simulator/` | Tag replay engine |
-| `api_studio/` | REST control API |
-| `RUN_SIMULATOR.bat` | Single entrypoint — do not create alternatives |
-| `setup_simulator.ps1` | One-command installer: installs Git, clones, validates bundled runtime, runs ensure-env |
-
----
-
-## Bundled Python Runtime
-
-- Path: `runtime/python/python.exe`
-- Ships **in git** (not gitignored, not downloaded separately)
-- `runtime_pids.json` IS gitignored (runtime artifact)
-- `suite_runtime.py ensure-env` creates the venv using this bundled Python + offline wheels — no internet required after clone
-
----
-
-## OPC UA Server
-
-- Endpoint: `opc.tcp://localhost:4840/simulator`
-- Namespace URI: `http://local/industrial-tag-simulator`
-- Node layout: `Objects / TagSimulator / <tag variables>` (one variable per tag)
-- The Simulator publishes here continuously during replay — this is how ACM reads it
-
----
-
-## MQTT
-
-- Topic: `industrial-tag-simulator/flat`
-- Payload: `{"published_at": "...", "tag1": 1.23, "tag2": 4.56, ...}` (flat wide JSON per tick)
-
----
-
-## Hard Constraints
-
-- **Simulator has zero knowledge of ACM.** Never add ACM references, imports, or configuration to this repo. All integration lives in ACM.
-- `RUN_SIMULATOR.bat` is the single entrypoint — no alternate launchers.
-- Portal UI is the only user-facing surface — no alternate UIs.
-- `suite_runtime.py` owns startup orchestration — do not bypass it.
-
----
-
-## Port Assignment
-
-`DEFAULT_PORTS` in `suite_runtime.py` has exactly 5 keys:
-- `industrial_web_port`
-- `api_studio_port`
-- `portal_port`
-- `opcua_port`
-- `mqtt_broker_port`
-
----
-
-## ACM Integration (read-only reference — implement in ACM, not here)
-
-ACM connects to the Simulator via OPC UA as a historian source:
-1. ACM's `acm_opcua_bridge.py` polls `opc.tcp://localhost:4840/simulator` every 1 s
-2. Bridge buffers tag rows into `data_cache/opcua_buffer.db`
-3. ACM's pipeline reads from that SQLite file — Simulator never knows ACM exists
-
-To register the Simulator as an ACM asset (run from the ACM directory):
-```bash
-python scripts/acm_seed_demo.py --opcua opc.tcp://localhost:4840/simulator --db acm_results.db
+```text
+Source / Generator / Dataset
+        ↓
+Simulation Instance
+        ↓
+Per-simulation timing, replay, scenario and mapping
+        ↓
+OPC UA target (shared or dedicated)
+        ↓
+Optional additional targets: MQTT / HTTP / OData / SQL / others
 ```
 
----
+Requirements implied by this priority:
 
-## Mistakes Made in Earlier Sessions (Never Repeat)
+- many simulations must run concurrently without sharing cursor, clock, lifecycle, source state, or target state;
+- OPC UA must support multiple simulations through shared hosts and dedicated endpoints;
+- every simulation must be independently configurable from the UI;
+- secondary targets must attach to the same Simulation Definition rather than create parallel workflows;
+- the UI is a first-class part of the product, not an administrative afterthought;
+- advanced OPC UA configuration must remain accessible without making simple configuration difficult;
+- runtime architecture and UI object model must use the same source → simulation → mapping → targets model.
 
-1. **Added `ACM_DIR` variable to `suite_runtime.py`** — an agent added an ACM directory variable and ACM chip to the portal HTML. All reverted. Zero ACM knowledge in this repo, ever.
-2. **Added ACM port to `launchPorts()`** in `simulator_proto.html` — reverted. Portal only knows about Simulator services.
-3. **MQTT-first integration** — an agent initially set up MQTT as the primary Simulator→ACM bridge and added ACM references to the Simulator. Reverted in full. OPC UA is the integration wire; it requires no changes to Simulator because Simulator was already publishing OPC UA.
-4. **Left `.bak` files in repo** — `portal/portal_app.py.bak` (43 KB) was a stale backup sitting alongside the 19 KB active file. Deleted.
+Do not optimize secondary features at the expense of the multi-simulation OPC UA path or the simulation-centric UI.
 
----
+## Current supported launcher and services
 
-## Key Internal Facts
+- `RUN_SIMULATOR.bat` is the supported entry point.
+- `suite_runtime.py` owns Windows runtime/venv validation, service startup, ports, and health checks.
+- Industrial FastAPI service: default port 8000.
+- Portal UI/control service: default port 8001.
+- OPC UA data plane: default port 4840.
+- Local MQTT broker: default port 1883.
+- API Studio has been retired from the active tree and is not started or packaged.
+- Active Portal UI file: `portal/simulator_ui.html`.
+- Active Portal server: `portal/portal_app.py`, now FastAPI-based.
 
-- `portal/portal_app.py` — 19 KB (the active file). Any `.bak` files are stale and should be deleted.
-- `industrial_simulator/frontend/index.html` — NOT vestigial. It is actively served by the FastAPI industrial_simulator service at `/`. Do not delete it.
-- `suite_runtime.py` is 27 KB; `DEFAULT_PORTS` has exactly 5 keys — do not add a 6th without updating all callers.
-- `portal/simulator_proto.html` is 85 KB monolithic — validate changes in a browser at http://localhost:8001.
-- The `launchPorts()` / `applyLaunchData()` / `launchUrls` functions in the HTML manage service links — do not add external (ACM) ports here.
+## Unified runtime
 
----
+New architecture lives under `industrial_simulator/app/simulation/`:
 
-## Development Rules
+- `models.py` — canonical simulation/source/target/frame/world models.
+- `contracts.py` — deliberately small source/target contracts.
+- `sources.py` — adapters over existing CSV/XLSX/Parquet/dataset managers, domain generators, SAP/LIMS source simulators, and small inline data.
+- `mapping.py` — pure protocol-neutral schema/frame transformations.
+- `interfaces/` — real target implementations split by interface responsibility.
+- `targets.py` — compatibility facade over the interface modules; do not put new protocol implementation here.
+- `runtime.py` — `SimulationInstance`, target queues, independent clocks, `SimulationManager`, Worlds, persistence, and interface-host ownership.
+- `api.py` — `/api/v2` control/data API.
 
-- Read code before proposing changes
-- Fix root causes; avoid fallback hacks
-- Keep startup, API, and UI concerns separated
-- Validate UI changes against the portal (http://localhost:8001)
-- Keep generated files and runtime artifacts out of git (see `.gitignore`)
-- No destructive git operations without explicit approval
+Legacy replay APIs and `SimulatorEngine` remain during migration for compatibility. Do not build new features into the legacy protocol-combination model unless needed to preserve existing behavior. New functionality should use the unified runtime.
 
----
+## UI rules
 
-## Development Branch
+The UI must be simulation-centric and visually/interaction-wise production quality.
 
-Active development branch: `claude/upbeat-hopper-m39epw`. Merge to `main` after each task.
+The primary workspace must make it easy to:
+
+- see all running/stopped/degraded simulations;
+- create a simulation;
+- duplicate a simulation;
+- start/pause/resume/stop one or many simulations;
+- inspect source progress and simulated time;
+- fine-tune source, timing, mappings, scenarios and targets per simulation;
+- configure OPC UA shared/dedicated hosting, port/path, namespace, root folder and NodeId mapping;
+- inspect every target's independent state, endpoint, queue depth, dropped frames, publish count and errors;
+- add secondary targets without leaving the simulation workflow;
+- distinguish simple settings from advanced settings without hiding advanced capability.
+
+Do not create separate protocol-centric pages that force users to configure the same simulation repeatedly. Protocol-specific controls belong inside the target editor for that Simulation Definition.
+
+Prefer progressive disclosure over dense forms. Keep persistent identity/name/source/state visible while editing detailed settings. Use large, legible typography and stable layouts; missing values must not shift unrelated controls.
+
+## Architecture rules
+
+- Simulation lifecycle and interface-host lifecycle are different. Stopping one simulation must not shut down a shared listener used by another simulation.
+- A Simulation Instance may have any number of target bindings. Never add `both`, `opcua+sql`, or other protocol-combination branches to the new runtime.
+- Canonical frames must remain protocol-neutral. MQTT topics/payloads, OPC UA node layout, SQL schemas, OData entities, etc. belong in target adapters.
+- Source adapters own ingestion semantics. Targets do not know whether values came from CSV, a generator, SAP/LIMS simulation, or another source.
+- Shared hosts and dedicated hosts are explicit target configuration, not hidden consequences of source/protocol choice.
+- Slow or failing targets must not stall unrelated targets unless the configured overflow/failure policy explicitly requests blocking/stopping.
+- Worlds coordinate related Simulation Instances; simple simulations must never require a World.
+- Reuse existing generator, data-manager, protocol-server, publisher, logging, and runtime-validation code when it is sound. Wrap before rewriting.
+
+## Ponytail rules — always apply
+
+Use this ladder for every addition/refactor:
+
+1. Does this code need to exist?
+2. Can existing repository code already do it?
+3. Can the Python standard library do it?
+4. Can an already-installed dependency do it?
+5. Is the abstraction backed by more than one real implementation/use case?
+6. Can the same behavior be expressed with fewer moving parts?
+
+Specific rules:
+
+- Delete dead/legacy paths before designing around them.
+- Do not create speculative plugin frameworks, factories, base classes, or indirection for one implementation.
+- Prefer plain functions/data composition over strategy-class hierarchies.
+- Do not expose placeholder APIs that only say “planned” or immediately fail as if they were implemented behavior.
+- Avoid compatibility fallbacks for dependencies that the supported bundled runtime guarantees; tests may inject fakes explicitly.
+- Do not carry a branch, option, config key, or layer merely because it might be useful later.
+- When a repeated mechanism is real (for example many source adapters or many target adapters), keep the shared contract as small as possible.
+- UI abstractions must also pass the same test: reusable components only when real repetition exists; avoid component forests and generic form engines.
+
+## Complexity policy
+
+For new or materially modified code:
+
+- A (1–5): preferred.
+- B (6–10): normal.
+- C (11–20): allowed when the branching is domain/lifecycle logic and the function remains understandable.
+- D/E/F (>20): do not introduce; decompose before merge.
+
+Do not game complexity metrics with meaningless helper extraction. Reduce decisions, separate responsibilities, or use data-driven dispatch where it genuinely clarifies behavior.
+
+## Validation policy — no GitHub Actions
+
+**Never use GitHub Actions for this repository.**
+
+- Do not create `.github/workflows/*`.
+- Do not add GitHub-hosted CI, workflow runs, CI badges, required Actions checks, or documentation that instructs future work to add them.
+- Automated or scripted validation, when useful, must run locally/manual from the repository or through an explicitly chosen non-GitHub mechanism.
+- Keep pytest, syntax checks, complexity checks and release validation available as local commands/scripts rather than GitHub workflows.
+
+This is a permanent repository constraint unless the repository owner explicitly reverses it.
+
+## Async/concurrency rules
+
+- Use `asyncio.Lock` for coroutine coordination. Never hold `threading.Lock`/`threading.RLock` across `await`.
+- Each Simulation Instance owns its own clock/cursor/state.
+- Each target has an independent bounded queue and explicit overflow/failure policy.
+- Target failures are isolated by default.
+- Shared listener mutation/publishing must be serialized at the host boundary.
+- Shutdown must be deterministic and release tasks/listeners cleanly.
+
+## Tests and behavior preservation
+
+- Existing tests are assets; do not delete them to make a refactor pass.
+- Add tests for new concurrency/lifecycle behavior.
+- Preserve legacy routes until their callers/UI have migrated.
+- Prefer compatibility adapters over duplicate implementations.
+- A cleanup that changes behavior must be explicit and tested.
+- Run tests locally/manual; do not wire them to GitHub Actions.
+
+## Deployment rules
+
+- Windows/offline deployment is a core supported constraint.
+- Preserve bundled runtime/wheel integrity validation in `suite_runtime.py` and release building.
+- Do not make normal runtime startup depend on internet access.
+- Release packaging must contain only runtime-required files; reference material/backups/dev artifacts must stay out.
+
+## External-product boundary
+
+Simulator is a standalone product. It must not contain application-specific knowledge, imports, paths, ports, or configuration for downstream products that consume Simulator. Integration belongs on the consuming side through Simulator's supported interfaces.
+
+## Repository hygiene
+
+- No `.bak` files, editor backups, generated outputs, test caches, unrelated knowledge bases, or obsolete ZIPs in releases.
+- Do not hard-code an “active development branch” in documentation.
+- Keep target architecture, current implementation, and migration debt clearly distinguished.
+- No GitHub Actions workflow files.

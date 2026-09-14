@@ -8,8 +8,4 @@ openpyxl==3.1.5
 httpx==0.28.1
 cryptography==48.0.0
 pyOpenSSL==26.2.0
-Flask==3.0.3
-flask-cors==4.0.1
-waitress==3.0.0
-requests==2.32.3
 pyarrow==22.0.0

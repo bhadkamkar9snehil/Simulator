@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import uuid
@@ -13,6 +14,7 @@ from app.models import JobRecord, JobType, utc_now_iso
 STATE_DIR = csv_manager.ROOT / "runtime_state"
 JOBS_PATH = STATE_DIR / "jobs.json"
 
+log = logging.getLogger("industrial.jobs")
 _lock = threading.RLock()
 _jobs: dict[str, JobRecord] = {}
 
@@ -22,11 +24,11 @@ def _load() -> None:
         return
     try:
         data = json.loads(JOBS_PATH.read_text(encoding="utf-8"))
-        for item in data:
-            record = JobRecord(**item)
-            _jobs[record.job_id] = record
-    except Exception:
-        _jobs.clear()
+        loaded = {record.job_id: record for record in (JobRecord(**item) for item in data)}
+    except Exception as exc:
+        log.exception("Could not load job state from %s.", JOBS_PATH)
+        raise RuntimeError(f"Could not load job state from {JOBS_PATH}: {exc}") from exc
+    _jobs.update(loaded)
 
 
 def _save() -> None:
@@ -90,22 +92,6 @@ def mark_failed(job_id: str, error: str, **fields: Any) -> JobRecord:
     payload = {"state": "failed", "completed_at": utc_now_iso(), "message": error, "error": error}
     payload.update(fields)
     return update_job(job_id, **payload)
-
-
-def cancel_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="cancelled", completed_at=utc_now_iso(), message="Cancellation requested.")
-
-
-def pause_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="paused", message="Pause requested.")
-
-
-def resume_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="queued", message="Resume requested.")
-
-
-def cleanup_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="cleanup_required", message="Cleanup requested.")
 
 
 def run_background(job_id: str, target: Callable[..., Any], *args: Any, **kwargs: Any) -> None:

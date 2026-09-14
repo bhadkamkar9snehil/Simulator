@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
 from app import csv_manager, dataset_manager
-from app.models import ReplayConfig, ReplayStatus, CurrentValue, CurrentValuesResponse, utc_now_iso
+from app.models import CurrentValue, CurrentValuesResponse, ReplayConfig, ReplayStatus, utc_now_iso
+from app.simulation.sources import IndexedCsvRows
 from app.type_inference import convert_value
-from typing import Protocol
 
 logger = logging.getLogger("industrial.replay")
 
@@ -24,42 +24,6 @@ class ProtocolPublisher(Protocol):
     async def stop(self) -> None: ...
     async def update_values(self, values: dict[str, tuple[Any, str]], timestamp: str | None = None, current_values: dict[str, CurrentValue] | None = None, mqtt_metadata: dict[str, dict[str, Any]] | None = None) -> None: ...
     def get_endpoint(self) -> str: ...
-
-
-class IndexedCsvRows:
-    def __init__(self, path: Path, max_rows: int | None = None):
-        self.path = path
-        self.columns: list[str] = []
-        self.offsets: list[int] = []
-        with path.open("r", newline="", encoding="utf-8-sig") as f:
-            header_line = f.readline()
-            if not header_line:
-                raise ValueError("File has no header.")
-            self.columns = [c.strip() for c in next(csv.reader([header_line]))]
-            if not self.columns:
-                raise ValueError("File has no header.")
-            if len(set(self.columns)) != len(self.columns):
-                raise ValueError("File has duplicate columns.")
-            while max_rows is None or len(self.offsets) < max_rows:
-                offset = f.tell()
-                line = f.readline()
-                if not line:
-                    break
-                self.offsets.append(offset)
-
-    @property
-    def row_count(self) -> int:
-        return len(self.offsets)
-
-    def row(self, index: int) -> dict[str, str]:
-        if index < 0 or index >= self.row_count:
-            raise IndexError("CSV row index out of range.")
-        with self.path.open("r", newline="", encoding="utf-8-sig") as f:
-            f.seek(self.offsets[index])
-            line = f.readline()
-        values = next(csv.reader([line]))
-        row = {col: values[i] if i < len(values) else "" for i, col in enumerate(self.columns)}
-        return row
 
 
 class SimulatorEngine:
@@ -188,14 +152,14 @@ class SimulatorEngine:
         while self.state == "running":
             try:
                 await self.emit_once()
-                
+
                 current_cursor = self.cursor
                 self._advance_cursor()
                 next_cursor = self.cursor
-                
+
                 if self.state != "running":
                     break
-                    
+
                 if self.config.timestamp_mode == "wall_clock":
                     delay = 1.0 / self.config.frequency_hz
                 else:
@@ -205,12 +169,12 @@ class SimulatorEngine:
                         t1 = self._get_row_datetime(current_cursor)
                         t2 = self._get_row_datetime(next_cursor)
                         delay = (t2 - t1).total_seconds()
-                        
+
                         if self.config.loop_mode == "ping_pong":
                             delay = abs(delay)
                         elif delay < 0:
                             delay = 1.0 / self.config.frequency_hz
-                            
+
                         if delay <= 0:
                             delay = 0.01
 
@@ -236,7 +200,7 @@ class SimulatorEngine:
         row = self._row_at(self.cursor)
         values_for_mqtt: dict[str, tuple[Any, str]] = {}
         mqtt_metadata: dict[str, dict[str, Any]] = {}
-        
+
         if self.config.timestamp_mode == "csv_timestamp_ignore_rate":
             ts_str = row.get("timestamp")
             if ts_str:
@@ -287,7 +251,6 @@ class SimulatorEngine:
             ],
         )
 
-        # A global unit/quality column is accepted for simple one-tag files.
         if unit is None:
             unit = self._row_value_case_insensitive(row, ["unit", "Unit", "UNIT"])
         if quality is None:

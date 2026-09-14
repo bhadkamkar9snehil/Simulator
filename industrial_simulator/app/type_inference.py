@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
 import re
+from typing import Any
 
 LABEL_COLUMNS = {"timestamp", "scenario", "operating_state", "phase", "product", "product_grade", "batch_id", "heat_id"}
 BOOLEAN_SUFFIXES = ("_active", "_alarm", "_fault", "_enabled")
@@ -55,7 +55,3 @@ def sanitize_tag_name(value: str) -> str:
     out = re.sub(r"[^A-Za-z0-9_.]+", "_", value.strip())
     out = re.sub(r"_+", "_", out).strip("._")
     return out or "Tag"
-
-
-def is_default_disabled_column(column: str) -> bool:
-    return False

@@ -12,6 +12,8 @@
 
 Simulator shall evolve from a collection of protocol- and workload-specific simulation paths into a **single unified simulation platform** capable of running **many independent or coordinated simulations concurrently**.
 
+The primary product focus is **end-to-end OPC UA simulation of multiple independent simulations at the same time, each able to serve one or more targets and each fully configurable from a simulation-centric UI**. Other protocols and targets must fit the same model, but they must not complicate or distract from making the multi-simulation OPC UA path excellent first.
+
 Each simulation instance shall be able to:
 
 - obtain data from a file, generated domain model, database, external interface, recorded stream, or another supported source;
@@ -19,7 +21,8 @@ Each simulation instance shall be able to:
 - publish the resulting simulated state concurrently to one or more protocol/interface targets;
 - share protocol listeners with other simulations when appropriate, or expose a dedicated listener/endpoint when required for integration realism;
 - continue serving healthy targets even when another target is unavailable or degraded;
-- participate optionally in a larger coordinated simulated **World** where multiple interface simulations represent the same plant, process, order, batch, equipment, or integration landscape.
+- participate optionally in a larger coordinated simulated **World** where multiple interface simulations represent the same plant, process, order, batch, equipment, or integration landscape;
+- be created, tuned, inspected and controlled without requiring users to understand internal runtime ownership or protocol-combination mechanics.
 
 The desired product is therefore not merely a data generator or replay tool. It is a **systems and interface simulator** for industrial integration, OT/IT testing, development, demonstrations, digital-twin-like scenarios, performance testing, and end-to-end validation.
 
@@ -39,9 +42,20 @@ Target Bindings
 Shared or Dedicated Interface Hosts
 ```
 
+The primary user-facing form of that model is:
+
+```text
+Simulation Workspace
+   ↓
+Simulation A ── Source / Clock / Mapping ── OPC UA + optional targets
+Simulation B ── Source / Clock / Mapping ── OPC UA + optional targets
+Simulation C ── Source / Clock / Mapping ── dedicated OPC UA endpoint
+...
+```
+
 The platform must support the simple case:
 
-> Play this CSV to MQTT at 5 Hz.
+> Play this CSV to OPC UA at 5 Hz.
 
 and scale to cases such as:
 
@@ -111,6 +125,29 @@ SAP production confirmation falls below target
 LIMS quality values may subsequently change
 ```
 
+### G-006 — OPC UA End-to-End Priority
+
+The first-class product path MUST make multi-simulation OPC UA operation excellent before secondary interface work is considered complete.
+
+This includes:
+
+- many concurrent simulations;
+- independent sources and clocks;
+- shared OPC UA hosting;
+- dedicated OPC UA endpoints;
+- per-simulation namespace/root/NodeId configuration;
+- collision-safe multi-simulation node exposure;
+- independent lifecycle and health;
+- live values and publish metrics;
+- full UI configuration without requiring raw JSON editing;
+- optional secondary targets attached to the same simulation.
+
+### G-007 — UI as a Primary Product Surface
+
+The UI MUST be treated as part of the product architecture, not as a thin administrative shell.
+
+Users MUST be able to perform the normal simulation lifecycle and configuration visually. Advanced configuration MAY expose raw structures for diagnostics/import/export, but ordinary operation MUST NOT require hand-editing JSON.
+
 ---
 
 ## 4. Core Domain Concepts
@@ -142,7 +179,7 @@ A single source MAY be used by multiple simulation instances simultaneously. Eac
 
 ### 4.2 Simulation Instance
 
-A **Simulation Instance** is the primary runtime object.
+A **Simulation Instance** is the primary runtime object and the primary UI editing object.
 
 Each simulation instance MUST have a stable identifier and SHOULD have a human-friendly name.
 
@@ -302,8 +339,8 @@ Example:
 ```text
 petroleum.csv
   ├─ Simulation A: 1× real-time → OPC UA
-  ├─ Simulation B: 50× → MQTT
-  └─ Simulation C: fixed 10 Hz → HTTP + SQL
+  ├─ Simulation B: 50× → OPC UA + MQTT
+  └─ Simulation C: fixed 10 Hz → dedicated OPC UA + SQL
 ```
 
 ### SIM-004 — Multiple Targets per Simulation
@@ -336,6 +373,26 @@ The UI/API SHOULD support selecting several simulations and performing group ope
 ### SIM-008 — Runtime Isolation
 
 Failure in one simulation MUST NOT crash unrelated simulations.
+
+### SIM-009 — Per-Simulation Fine Tuning
+
+Every simulation MUST be independently configurable without mutating unrelated simulations.
+
+The UI and API SHOULD expose, as applicable:
+
+- source selection and source-specific options;
+- start/end position;
+- timing mode;
+- fixed frequency;
+- source timestamp speed multiplier;
+- loop policy;
+- context fields;
+- signal inclusion/exclusion;
+- signal rename/type/unit/quality/scale/offset mapping;
+- scenario/fault options for generator-backed sources;
+- target queue/failure policy;
+- OPC UA shared/dedicated mode and endpoint details;
+- target-specific settings for additional protocols.
 
 ---
 
@@ -639,6 +696,12 @@ Mapping profiles SHOULD be reusable across simulation instances.
 
 Mappings MUST be validated before a simulation is started where validation can be performed statically.
 
+### MAP-005 — UI Mapping Editor
+
+The normal UI SHOULD provide a tabular mapping editor with stable rows and clear columns for source signal, enabled state, target name/NodeId, datatype, unit, quality override, scale and offset.
+
+Bulk enable/disable, search/filter and sensible defaults SHOULD reduce repetitive editing for large tag sets.
+
 ---
 
 ## 13. World / Coordinated Environment Requirements
@@ -754,9 +817,36 @@ The API SHOULD expose supported:
 
 ## 16. User Interface Requirements
 
+### UI-000 — Quality Bar
+
+The UI MUST be treated as a production product surface with a consistently high visual and interaction quality bar.
+
+It SHOULD be:
+
+- simulation-centric rather than protocol-page-centric;
+- legible at normal desktop viewing distances;
+- stable in geometry so values appearing/disappearing do not move unrelated controls;
+- visually restrained, using hierarchy and spacing instead of excessive decorative elements;
+- fast to scan when many simulations are active;
+- explicit about running/degraded/error state without relying only on color;
+- progressively disclosed so common workflows stay simple and advanced controls remain available;
+- keyboard- and form-friendly for users configuring many tags/targets;
+- consistent across create, edit, inspect and live-operation states.
+
+Normal product usage MUST NOT require raw JSON editing.
+
 ### UI-001 — Simulation Workspace
 
-The primary UI SHOULD center on running simulation instances rather than one global Replay screen.
+The primary UI MUST center on running and configured Simulation Instances rather than one global Replay screen.
+
+The first-class workspace SHOULD provide:
+
+- search and filtering;
+- status grouping;
+- multi-select/group controls;
+- create and duplicate actions;
+- clear separation between configured, running, paused, degraded, completed and errored instances;
+- direct access to per-simulation configuration and diagnostics.
 
 A simulation card/row SHOULD display at minimum:
 
@@ -767,8 +857,9 @@ A simulation card/row SHOULD display at minimum:
 - clock mode/speed;
 - cursor/progress where meaningful;
 - target list and individual target health;
+- OPC UA endpoint summary when present;
 - throughput/basic metrics;
-- pause/stop/inspect actions.
+- pause/stop/inspect/edit actions.
 
 Example concept:
 
@@ -789,26 +880,87 @@ CSV                OPC UA :4840 / PlantA      Running
 
 Creating a simulation SHOULD follow a straightforward workflow:
 
-1. choose/configure source;
-2. configure timing/replay/scenario;
-3. configure mappings/transformations;
-4. add one or more targets;
-5. review;
-6. start.
+1. identity and source;
+2. timing/replay/scenario;
+3. signal mappings;
+4. OPC UA target configuration;
+5. optional additional targets;
+6. review;
+7. save/start.
+
+The flow SHOULD preserve the current draft while moving between sections. Validation SHOULD appear next to the affected field/section rather than only after submission.
 
 ### UI-003 — Simple Mode
 
 The UI MUST keep simple workflows simple.
 
-A user wanting “CSV → MQTT at 5 Hz” SHOULD NOT need to understand Worlds, host managers, or advanced architecture concepts.
+A user wanting “CSV → OPC UA at 5 Hz” SHOULD NOT need to understand Worlds, host managers, queue internals, or advanced architecture concepts.
+
+A sensible default OPC UA target SHOULD be easy to add in one action and then optionally customize.
 
 ### UI-004 — Advanced Mode
 
-Advanced configuration SHOULD expose shared/dedicated listeners, queue/backpressure policy, namespace/topic mappings, coordinated Worlds, and performance settings.
+Advanced configuration SHOULD expose shared/dedicated listeners, bind/advertised host, port/path, namespace URI, root folder, NodeId mapping, queue/backpressure policy, target failure policy, coordinated Worlds, and performance settings.
+
+Advanced controls SHOULD be grouped by concern rather than presented as one dense form.
 
 ### UI-005 — Live Target Management
 
 Where supported, the UI SHOULD allow target add/remove/restart while a simulation remains active.
+
+### UI-006 — Per-Simulation Inspector/Editor
+
+Opening a simulation SHOULD present one coherent inspector/editor with persistent simulation identity/status and sections equivalent to:
+
+- Overview;
+- Source;
+- Timing & Replay;
+- Scenario/Faults where applicable;
+- Signals & Mapping;
+- Targets;
+- OPC UA details;
+- Metrics;
+- Errors/Logs.
+
+Editing one section MUST NOT discard unsaved work in another section.
+
+### UI-007 — OPC UA Configuration Experience
+
+For OPC UA targets, the UI MUST expose at least:
+
+- shared vs dedicated hosting;
+- bind/advertised endpoint information;
+- port;
+- path;
+- namespace URI;
+- root folder;
+- generated or configured NodeIds;
+- tag count;
+- current server/target state;
+- endpoint copy action;
+- validation/collision errors;
+- live publish counters and latest error.
+
+The UI SHOULD make the hierarchy understandable before start, including a preview of the resulting NodeId/root layout where practical.
+
+### UI-008 — Large Mapping Usability
+
+For simulations with many signals, the UI SHOULD support:
+
+- search;
+- filtering;
+- bulk enable/disable;
+- bulk prefix/root changes where safe;
+- sticky headers;
+- fixed important columns;
+- clear changed/invalid states;
+- avoiding full-page reflow during edits.
+
+### UI-009 — No Duplicate Protocol Workflows
+
+The product SHOULD NOT maintain separate user workflows such as “OPC UA Replay”, “MQTT Replay”, and “SQL Replay” for the same underlying simulation concept.
+
+A user configures the Simulation once and attaches target bindings to it.
 
 ---
 
@@ -817,11 +969,15 @@ Where supported, the UI SHOULD allow target add/remove/restart while a simulatio
 ### 17.1 OPC UA
 
 - MUST support existing OPC UA simulation behavior.
-- SHOULD support multiple simulations under one shared server.
+- MUST be the primary end-to-end multi-simulation implementation path.
+- SHOULD support multiple simulations under one shared server without restarting unrelated simulations when membership changes.
 - MUST support dedicated OPC UA endpoints/ports when requested.
 - Each binding MUST have a collision-safe namespace/root/NodeId strategy.
 - Server lifecycle MUST be owned by the host layer, not by one arbitrary simulation engine.
 - Python/runtime compatibility workarounds SHOULD be isolated from domain/runtime logic.
+- The target SHOULD expose endpoint, host mode, namespace/root, active tag count, publish counts and errors through runtime status.
+- The UI MUST allow per-simulation fine tuning of OPC UA target settings.
+- Shared-host membership changes SHOULD eventually use incremental namespace/group mutation rather than stop/rebuild of the listener.
 
 ### 17.2 MQTT
 
@@ -935,6 +1091,12 @@ Simulation instances MUST NOT exclusively own protocol listeners that may be sha
 
 Adding a new source or target SHOULD require implementing its source/target contract and registration metadata, not editing every runtime control path.
 
+### ARCH-006 — UI Mirrors Runtime Concepts
+
+The UI data model SHOULD map directly to persisted/runtime `SimulationDefinition`, source, mapping and target concepts.
+
+Do not build a second UI-only configuration model that then requires complex translation into the runtime model.
+
 ---
 
 ## 19. Generator Design Requirements
@@ -979,7 +1141,9 @@ New or materially modified Python functions SHOULD target:
 
 - McCabe/Radon A or B grade for normal code;
 - C only when complexity is inherent and reviewed;
-- D/E/F SHOULD fail the quality gate unless explicitly grandfathered with justification.
+- D/E/F SHOULD be decomposed before acceptance unless explicitly grandfathered with justification.
+
+The same principle applies to frontend code: avoid giant event-handler functions, protocol/state switch ladders, and duplicated form logic.
 
 ### CQ-002 — Delete Before Refactor
 
@@ -997,17 +1161,31 @@ The following are architectural cleanup requirements unless intentionally reacti
 6. centralize generator execution/validation;
 7. remove dead always-false policy hooks such as default-disabled-column logic unless a real rule is introduced;
 8. stop silent dependency-to-mock fallback for advertised production protocols;
-9. replace repository-wide release collection/exclusion logic with an explicit runtime allowlist;
+9. use an explicit runtime release allowlist;
 10. keep reference/development artifacts out of production release packages;
-11. keep current documentation synchronized with actual architecture.
+11. keep current documentation synchronized with actual architecture;
+12. migrate user-facing replay workflows to Simulation Definitions and delete protocol-combination UI/backend paths once no callers remain.
 
 ### CQ-004 — Portal Server Simplification
 
-The custom `BaseHTTPRequestHandler` portal backend SHOULD be replaced or simplified using the already-adopted FastAPI stack unless a measurable reason exists to retain the custom server.
+The Portal control backend SHOULD use the already-adopted FastAPI stack rather than hand-written HTTP dispatch unless a measurable reason exists otherwise.
 
 ### CQ-005 — Async Concurrency Correctness
 
 Coroutine-level synchronization MUST use appropriate async primitives where required. Threading locks MUST NOT be assumed to provide coroutine mutual exclusion across `await` boundaries.
+
+### CQ-006 — Ponytail as a Continuous Rule
+
+For each addition or refactor, prefer in this order:
+
+1. delete if unnecessary;
+2. reuse existing repository behavior;
+3. use the standard library;
+4. use an already-installed dependency;
+5. add the smallest abstraction justified by more than one real use;
+6. express repeated branching as clear data/configuration where that genuinely reduces decisions.
+
+A UI component library or generic form framework MUST NOT be introduced merely because future reuse is imaginable.
 
 ---
 
@@ -1053,19 +1231,23 @@ Production releases MUST NOT accidentally include:
 - test caches;
 - local runtime state.
 
-### REL-003 — CI
+### REL-003 — Local Quality Validation Only
 
-The repository SHOULD gain Windows CI covering at least:
+GitHub Actions MUST NOT be used for this repository.
+
+The repository SHOULD keep local/manual commands or scripts for at least:
 
 - syntax/compile validation;
 - unit/integration tests;
-- cyclomatic-complexity policy;
+- cyclomatic-complexity inspection;
 - release packaging validation;
 - runtime-required-file verification.
 
+No `.github/workflows/*`, GitHub-hosted CI, required Actions checks, CI badges, or documentation instructing future agents to add GitHub Actions SHOULD be present.
+
 ### REL-004 — Tagged Releases
 
-Stable distributable versions SHOULD eventually be represented by GitHub Releases with clear versioning and release notes.
+Stable distributable versions MAY eventually be represented by GitHub Releases with clear versioning and release notes. This does not imply use of GitHub Actions or automated GitHub CI.
 
 ---
 
@@ -1220,6 +1402,19 @@ When Worlds are implemented, tests SHOULD verify identity and event propagation 
 
 OPC UA, MQTT, HTTP, SQL, and other protocol adapters SHOULD have realistic integration tests against representative clients where practical.
 
+### TEST-009 — OPC UA Multi-Simulation Acceptance Tests
+
+Local/manual automated tests MUST cover at minimum:
+
+- two or more simultaneous simulations publishing different values through one shared OPC UA host;
+- stopping one shared-host simulation while another continues;
+- two or more dedicated OPC UA simulations on separate ports;
+- namespace/root/NodeId collision prevention;
+- independent clocks/cursors;
+- one simulation publishing to OPC UA plus another target concurrently.
+
+Testing requirements do not imply GitHub Actions.
+
 ---
 
 ## 28. Migration Requirements from Current Architecture
@@ -1232,7 +1427,8 @@ Migration SHOULD be incremental and preserve working behavior.
 - remove clearly dead/legacy artifacts;
 - correct stale architecture documentation;
 - fix release packaging hygiene;
-- add CI/complexity reporting.
+- keep local/manual test and complexity commands available;
+- ensure GitHub Actions workflow files are absent.
 
 ### Phase 2 — Introduce Canonical Runtime Model
 
@@ -1241,37 +1437,41 @@ Migration SHOULD be incremental and preserve working behavior.
 - define `SimulationInstance` and `SimulationManager`;
 - retain compatibility adapters around existing replay paths during migration.
 
-### Phase 3 — Separate Interface Host Ownership
+### Phase 3 — OPC UA Multi-Simulation Foundation
 
-- introduce `InterfaceHostManager` responsibility;
-- move OPC UA and MQTT shared listener lifecycle out of simulation engines;
-- remove global protocol state and `both` mode.
-
-### Phase 4 — Multi-Simulation Runtime
-
+- separate OPC UA listener ownership into `InterfaceHostManager` responsibility;
+- support shared and dedicated OPC UA target bindings;
 - permit arbitrary concurrent Simulation Instances;
-- add independent target bindings;
+- guarantee collision-safe node layout;
+- avoid restarting unrelated shared-host simulations when membership changes;
+- surface per-simulation OPC UA endpoint/config/status to the UI.
+
+### Phase 4 — Simulation-Centric UI
+
+- make the Simulations workspace the primary product workspace;
+- build create/edit/duplicate/start/pause/resume/stop flows around `SimulationDefinition`;
+- provide per-simulation source, timing, mapping and OPC UA target configuration;
+- provide strong mapping usability for large signal sets;
+- expose health, progress, throughput and errors clearly;
+- preserve advanced controls through progressive disclosure.
+
+### Phase 5 — Multi-Target Runtime
+
+- add independent target bindings beyond OPC UA;
 - add per-target health and failure policies;
-- add target worker queues/backpressure.
+- add target worker queues/backpressure;
+- migrate HTTP streams, MQTT, SQL, OData and other interfaces into the same simulation workflow.
 
-### Phase 5 — Unified Interface Adapters
+### Phase 6 — Remove Legacy Protocol Combination Paths
 
-- migrate HTTP streams;
-- migrate SQL;
-- integrate SAP/OData capability;
-- integrate LIMS/ODBC capability;
-- add future interface adapters through the same contracts.
+- move legacy replay/workload callers onto `SimulationManager`;
+- delete global protocol state and `both` mode when no callers remain;
+- delete duplicate protocol-centric UI paths after feature parity exists in the Simulations workspace.
 
-### Phase 6 — Worlds
+### Phase 7 — Worlds
 
 - add optional shared World identity/state/clock/event coordination;
 - allow OT and enterprise interfaces to expose coherent views of one simulated environment.
-
-### Phase 7 — UI Evolution
-
-- replace protocol-centric replay UI with a simulation-centric workspace;
-- retain a simple flow for common single-source/single-target use cases;
-- add advanced shared/dedicated host, World, mapping, queue, and performance controls.
 
 ---
 
@@ -1287,21 +1487,24 @@ The following guardrails are important:
 6. Protocol-specific concerns MUST NOT leak back into the simulation core.
 7. Simulator MUST remain independent of downstream consuming applications. Integration-specific logic belonging to another product MUST remain outside Simulator unless it is a generic interface capability.
 8. Existing useful offline Windows deployment behavior SHOULD not be sacrificed without a replacement of equal or better usability.
+9. GitHub Actions MUST NOT be used.
+10. Secondary target/protocol work SHOULD NOT delay making the multi-simulation OPC UA path and simulation-centric UI complete.
+11. UI sophistication MUST NOT be implemented through unnecessary frontend architectural complexity; use the smallest clear component/data model that supports real reuse.
 
 ---
 
 ## 30. Example Target Scenarios
 
-### Scenario A — Simple CSV Replay
+### Scenario A — Simple OPC UA Replay
 
 ```text
 Source: CSV
 Clock: fixed 5 Hz
 Simulation: one instance
-Target: MQTT
+Target: OPC UA shared :4840 / LineA
 ```
 
-### Scenario B — One Source, Multiple Protocols
+### Scenario B — One Source, Multiple Targets
 
 ```text
 Source: petroleum.csv
@@ -1317,9 +1520,9 @@ Targets:
 
 ```text
 petroleum.csv
-  ├─ sim-A: 1× → OPC UA
-  ├─ sim-B: 50× → MQTT
-  └─ sim-C: fixed 10 Hz → SQL
+  ├─ sim-A: 1× → shared OPC UA / SimA
+  ├─ sim-B: 50× → shared OPC UA / SimB + MQTT
+  └─ sim-C: fixed 10 Hz → dedicated OPC UA :4842 + SQL
 ```
 
 All three have independent cursors and lifecycle.
@@ -1370,9 +1573,9 @@ A process fault can consistently affect all relevant projections.
 40 active simulated assets
 12 source files
 5 generated domain models
-15 OPC UA bindings
+15 shared OPC UA bindings
+8 dedicated OPC UA endpoints
 20 MQTT bindings
-8 dedicated device endpoints
 selected SQL mirroring
 selected HTTP streams
 several simulations coordinated into Worlds
@@ -1388,16 +1591,20 @@ The first major architectural milestone should be considered achieved when all o
 
 1. `SimulationInstance` is a first-class persisted/runtime object.
 2. Two or more simulations can run concurrently with independent cursors and clocks.
-3. One simulation can publish to two or more target types without a `both` protocol mode.
-4. OPC UA/MQTT host lifecycle is separated from simulation lifecycle.
-5. Two simulations can share one interface host without interfering with each other.
-6. At least one target can fail while the parent simulation and another target continue running.
-7. Canonical frames do not contain MQTT-, OPC-UA-, SQL-, or OData-specific fields.
-8. Source and target implementations are registered through small contracts.
-9. The UI/API can display independent simulation and target states.
-10. Existing single-file replay remains straightforward for users.
-11. The repository has automated tests covering multi-simulation isolation and shared-host ownership.
-12. Legacy protocol-combination branches are no longer the central runtime model.
+3. One simulation can publish to OPC UA and one or more additional targets without a `both` protocol mode.
+4. OPC UA host lifecycle is separated from simulation lifecycle.
+5. Two simulations can share one OPC UA host without interfering with each other.
+6. Dedicated OPC UA simulations can run concurrently on different endpoints.
+7. At least one target can fail while the parent simulation and another target continue running.
+8. Canonical frames do not contain MQTT-, OPC-UA-, SQL-, or OData-specific fields.
+9. Source and target implementations use small contracts.
+10. The primary UI can create, edit, duplicate, start, pause, resume and stop independent simulations.
+11. The UI can fully configure a simulation's source, timing, mappings and OPC UA target without raw JSON editing.
+12. The UI can display independent simulation and target state, endpoint, progress, throughput and errors.
+13. Existing single-file replay remains straightforward for users.
+14. Local/manual automated tests cover multi-simulation isolation and shared OPC UA ownership.
+15. Legacy protocol-combination branches are no longer the central runtime or UI model.
+16. No GitHub Actions workflow is present.
 
 ---
 
@@ -1430,4 +1637,8 @@ The fundamental design rule is:
 
 > **Simulations own simulated state and time. Interface hosts own network endpoints. Target bindings connect the two.**
 
-This rule should guide future refactoring and prevent protocol lifecycle, simulation lifecycle, and network listener lifecycle from becoming entangled again.
+The product-priority rule is:
+
+> **Make multi-simulation OPC UA operation and its simulation-centric UI impeccable first; make every other interface fit the same simple model rather than creating parallel workflows.**
+
+These rules should guide future refactoring and prevent protocol lifecycle, simulation lifecycle, network listener lifecycle and UI workflow from becoming entangled again.

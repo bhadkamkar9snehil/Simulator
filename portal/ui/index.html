@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulator</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="Simulator">
+        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div class="brand-copy">
+          <strong>Simulator</strong>
+          <span>Multi-instance OPC UA workspace</span>
+        </div>
+      </div>
+
+      <nav class="topnav" aria-label="Primary navigation">
+        <button class="topnav-item active" data-nav="simulations">Simulations</button>
+        <button class="topnav-item" data-nav="interfaces">Interface hosts</button>
+        <button class="topnav-item" data-nav="sources">Sources</button>
+      </nav>
+
+      <div class="topbar-status">
+        <div class="service-state" id="industrialState">
+          <span class="state-dot"></span>
+          <span>Industrial</span>
+          <strong>Checking</strong>
+        </div>
+        <div class="service-state" id="opcHostState">
+          <span class="state-dot"></span>
+          <span>OPC UA</span>
+          <strong>0 hosts</strong>
+        </div>
+        <button class="icon-button" data-action="refresh" title="Refresh" aria-label="Refresh">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 8.2A7 7 0 0 1 18.4 7M17.9 15.8A7 7 0 0 1 5.6 17"/></svg>
+        </button>
+        <a class="button tertiary compact" href="/legacy">Legacy tools</a>
+      </div>
+    </header>
+
+    <main class="workspace" id="simulationsWorkspace">
+      <aside class="simulation-rail">
+        <div class="rail-heading">
+          <div>
+            <h1>Simulations</h1>
+            <p id="simulationCount">0 configured</p>
+          </div>
+          <button class="button primary" data-action="new-simulation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            New
+          </button>
+        </div>
+
+        <div class="rail-summary" id="railSummary"></div>
+
+        <div class="rail-filters">
+          <label class="search-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+            <input id="simulationSearch" type="search" placeholder="Search simulations" autocomplete="off" />
+          </label>
+          <select id="simulationStateFilter" aria-label="Filter simulations by state">
+            <option value="all">All states</option>
+            <option value="running">Running</option>
+            <option value="paused">Paused</option>
+            <option value="degraded">Degraded</option>
+            <option value="error">Error</option>
+            <option value="stopped">Stopped</option>
+            <option value="created">Configured</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+
+        <div class="simulation-list" id="simulationList"></div>
+      </aside>
+
+      <section class="detail-stage">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-graphic" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <h2>Build a simulation</h2>
+          <p>Choose a source, tune its timing and signals, then expose it through shared or dedicated OPC UA. Add other targets only when you need them.</p>
+          <button class="button primary large" data-action="new-simulation">Create simulation</button>
+        </div>
+
+        <div class="simulation-detail" id="simulationDetail" hidden>
+          <header class="detail-header" id="detailHeader"></header>
+          <div class="detail-tabs" id="detailTabs" role="tablist"></div>
+          <div class="detail-content" id="detailContent"></div>
+        </div>
+      </section>
+    </main>
+
+    <main class="single-stage" id="interfacesWorkspace" hidden>
+      <section class="single-panel">
+        <div class="single-panel-head">
+          <div>
+            <h1>Interface hosts</h1>
+            <p>Live shared and dedicated listeners owned by the runtime.</p>
+          </div>
+          <button class="button secondary" data-action="refresh">Refresh</button>
+        </div>
+        <div id="interfacesContent"></div>
+      </section>
+    </main>
+
+    <main class="single-stage" id="sourcesWorkspace" hidden>
+      <section class="single-panel">
+        <div class="single-panel-head">
+          <div>
+            <h1>Sources</h1>
+            <p>Files, datasets and domain generators available to Simulation Definitions.</p>
+          </div>
+          <button class="button secondary" data-action="refresh-sources">Refresh</button>
+        </div>
+        <div id="sourcesContent"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+  <div class="busy-overlay" id="busyOverlay" hidden><div class="spinner"></div></div>
+
+  <script>window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};</script>
+  <script type="module" src="/ui/app.js"></script>
+  <script type="module" src="/ui/opcua_controls.js"></script>
+</body>
+</html>

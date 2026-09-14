@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,6 @@ config = {
     "opcua_port": env_port("OPCUA_PORT", 4840),
     "mqtt_port": env_port("MQTT_BROKER_PORT", env_port("MQTT_PORT", 1883)),
     "mqtt_host": os.environ.get("MQTT_HOST", "localhost"),
-    "api_studio_port": env_port("API_STUDIO_PORT", 5050),
     "portal_port": env_port("PORTAL_PORT", 8001),
 }
 (frontend / "launcher-config.js").write_text(
