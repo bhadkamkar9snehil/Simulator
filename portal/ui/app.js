@@ -263,7 +263,7 @@ async function saveDraft() {
 
 async function lifecycle(action) {
   if (!state.draft) return;
-  if (action === "start" && (state.isNew || dirty())) await saveDraft();
+  if (["start", "restart"].includes(action) && (state.isNew || dirty())) await saveDraft();
   const id = state.selectedId;
   if (!id) return;
   const actions = {
@@ -271,13 +271,34 @@ async function lifecycle(action) {
     pause: simulatorApi.pauseSimulation,
     resume: simulatorApi.resumeSimulation,
     stop: simulatorApi.stopSimulation,
+    restart: simulatorApi.restartSimulation,
   };
   const result = await actions[action](id);
   state.draftStatus = result;
-  await loadSimulations(id);
-  await loadRuntime();
-  await loadSnapshot(id);
+  await refreshSelected(id);
   toast(`${action[0].toUpperCase()}${action.slice(1)} completed.`, "success");
+}
+
+async function moveCursor(action) {
+  const id = state.selectedId;
+  if (!id || state.isNew) return;
+  let result;
+  if (action === "reset-cursor") {
+    result = await simulatorApi.resetCursor(id);
+  } else {
+    const raw = document.getElementById("seekPosition")?.value;
+    const position = Number.parseInt(raw, 10);
+    if (!Number.isInteger(position) || position < 0) throw new Error("Seek position must be a non-negative integer.");
+    result = await simulatorApi.seekSimulation(id, position);
+  }
+  state.draftStatus = result;
+  await refreshSelected(id);
+  toast(action === "reset-cursor" ? "Cursor reset to the configured start." : "Cursor position updated.", "success", "Simulation cursor");
+}
+
+async function refreshSelected(id) {
+  await Promise.all([loadSimulations(id), loadRuntime()]);
+  await loadSnapshot(id);
 }
 
 async function duplicateCurrent() {
@@ -341,7 +362,8 @@ async function runAction(action, node) {
   if (action === "refresh-sources") { await loadResources(); renderSourcesView(); return; }
   if (action === "new-simulation") { if (!dirty() || confirm("Discard unsaved changes?")) createDraft(); return; }
   if (action === "save") { await saveDraft(); render(); return; }
-  if (["start", "pause", "resume", "stop"].includes(action)) { await lifecycle(action); render(); return; }
+  if (["start", "pause", "resume", "stop", "restart"].includes(action)) { await lifecycle(action); render(); return; }
+  if (["reset-cursor", "seek-cursor"].includes(action)) { await moveCursor(action); render(); return; }
   if (action === "duplicate") { await duplicateCurrent(); return; }
   if (action === "delete") { await deleteCurrent(); return; }
   if (action === "preview-source") { await previewSource(); return; }
@@ -540,7 +562,7 @@ async function refreshLive() {
     renderServiceStatus({ status: "ok" });
     renderRail();
     if (state.navigation === "interfaces") renderInterfacesView();
-    if (state.draft && ["overview", "targets"].includes(state.tab)) renderDetail();
+    if (state.draft && ["overview", "timing", "targets"].includes(state.tab)) renderDetail();
   } catch {
     renderServiceStatus(null);
   }
