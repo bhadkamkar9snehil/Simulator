@@ -17,6 +17,7 @@ router = APIRouter(prefix="/sim-api", tags=["Simulated APIs"])
 
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _RESPONSE_MODES = {"values", "frame", "record", "history", "template"}
+_SELECTION_MODES = {"current", "history_match"}
 _TOKEN_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
 _SEGMENT_PARAM_RE = re.compile(r"^\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -89,10 +90,7 @@ def _path_pattern(path: str) -> re.Pattern[str]:
 
 
 def _route_shape(path: str) -> tuple[str, ...]:
-    shape: list[str] = []
-    for segment in _path_parts(path):
-        shape.append("{}" if _SEGMENT_PARAM_RE.fullmatch(segment) else segment)
-    return tuple(shape)
+    return tuple("{}" if _SEGMENT_PARAM_RE.fullmatch(segment) else segment for segment in _path_parts(path))
 
 
 def _specificity(path: str) -> tuple[int, int]:
@@ -113,9 +111,14 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
     if response_mode not in _RESPONSE_MODES:
         raise ValueError(f"Unsupported API response mode: {response_mode}")
 
+    selection_mode = str(config.get("selection_mode", "current")).strip().lower()
+    if selection_mode not in _SELECTION_MODES:
+        raise ValueError(f"Unsupported API selection mode: {selection_mode}")
+
     status_code = int(config.get("status_code", 200))
     empty_status_code = int(config.get("empty_status_code", 503))
-    if not 100 <= status_code <= 599 or not 100 <= empty_status_code <= 599:
+    not_found_status = int(config.get("not_found_status", 404))
+    if any(not 100 <= code <= 599 for code in (status_code, empty_status_code, not_found_status)):
         raise ValueError("API status codes must be between 100 and 599.")
 
     delay_ms = int(config.get("delay_ms", 0))
@@ -125,24 +128,30 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
     if not 1 <= history_size <= 100_000:
         raise ValueError("API history_size must be between 1 and 100000.")
 
-    headers = _parse_headers(config.get("response_headers"))
-    required_headers = _parse_headers(config.get("required_headers"))
-    template = _parse_template(config.get("response_template"))
+    match_frame = str(config.get("match_frame", "")).strip()
+    match_request = str(config.get("match_request", "")).strip()
+    if selection_mode == "history_match" and (not match_frame or not match_request):
+        raise ValueError("History-match API selection requires match_frame and match_request paths.")
+
     return {
         "method": method,
         "path": path,
         "response_mode": response_mode,
+        "selection_mode": selection_mode,
         "status_code": status_code,
         "empty_status_code": empty_status_code,
+        "not_found_status": not_found_status,
         "delay_ms": delay_ms,
         "history_size": history_size,
         "fields": _parse_fields(config.get("fields")),
         "envelope": str(config.get("envelope", "")).strip(),
         "include_context": bool(config.get("include_context", False)),
         "include_system_fields": bool(config.get("include_system_fields", True)),
-        "response_headers": headers,
-        "required_headers": required_headers,
-        "response_template": template,
+        "response_headers": _parse_headers(config.get("response_headers")),
+        "required_headers": _parse_headers(config.get("required_headers")),
+        "response_template": _parse_template(config.get("response_template")),
+        "match_frame": match_frame,
+        "match_request": match_request,
     }
 
 
@@ -153,8 +162,10 @@ class ApiProjection:
     method: str
     path: str
     response_mode: str
+    selection_mode: str
     status_code: int
     empty_status_code: int
+    not_found_status: int
     delay_ms: int
     fields: list[str]
     envelope: str
@@ -164,6 +175,8 @@ class ApiProjection:
     required_headers: dict[str, str]
     response_template: Any
     history_size: int
+    match_frame: str
+    match_request: str
     pattern: re.Pattern[str]
     current: SimulationFrame | None = None
     history: deque[SimulationFrame] = field(init=False)
@@ -228,6 +241,7 @@ class ApiRegistry:
                 "method": item.method,
                 "path": f"/sim-api{item.path}",
                 "response_mode": item.response_mode,
+                "selection_mode": item.selection_mode,
                 "request_count": item.request_count,
                 "last_request_at": item.last_request_at,
             }
@@ -291,11 +305,26 @@ class RestApiTarget:
             "history_count": len(projection.history),
             "method": projection.method,
             "path": f"/sim-api{projection.path}",
+            "response_mode": projection.response_mode,
+            "selection_mode": projection.selection_mode,
         }
 
 
 def _signal_values(frame: SimulationFrame) -> dict[str, Any]:
     return {name: signal.value for name, signal in frame.values.items()}
+
+
+def _frame_scope(frame: SimulationFrame | None) -> dict[str, Any]:
+    return {
+        "values": _signal_values(frame) if frame else {},
+        "context": dict(frame.context) if frame else {},
+        "meta": {
+            "sequence": frame.sequence if frame else None,
+            "timestamp": frame.timestamp if frame else None,
+            "source_timestamp": frame.source_timestamp if frame else None,
+            "simulation_id": frame.simulation_id if frame else None,
+        },
+    }
 
 
 def _record(frame: SimulationFrame, projection: ApiProjection) -> dict[str, Any]:
@@ -306,13 +335,7 @@ def _record(frame: SimulationFrame, projection: ApiProjection) -> dict[str, Any]
     if projection.include_context:
         record.update(frame.context)
     if projection.include_system_fields:
-        record = {
-            "sequence": frame.sequence,
-            "timestamp": frame.timestamp,
-            "source_timestamp": frame.source_timestamp,
-            "simulation_id": frame.simulation_id,
-            **record,
-        }
+        record = {**_frame_scope(frame)["meta"], **record}
     return record
 
 
@@ -345,22 +368,28 @@ def _render_template(value: Any, scope: dict[str, Any]) -> Any:
 
 def _request_scope(frame: SimulationFrame | None, path_params: dict[str, str], query: dict[str, str], body: Any) -> dict[str, Any]:
     return {
-        "values": _signal_values(frame) if frame else {},
-        "context": dict(frame.context) if frame else {},
-        "meta": {
-            "sequence": frame.sequence if frame else None,
-            "timestamp": frame.timestamp if frame else None,
-            "source_timestamp": frame.source_timestamp if frame else None,
-            "simulation_id": frame.simulation_id if frame else None,
-        },
+        **_frame_scope(frame),
         "path": path_params,
         "query": query,
         "body": body if isinstance(body, dict) else {"value": body},
     }
 
 
+def _selected_frame(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> SimulationFrame | None:
+    if projection.selection_mode == "current" or projection.response_mode == "history":
+        return projection.current
+    request_value = _lookup(_request_scope(None, path_params, query, body), projection.match_request)
+    if request_value is None:
+        raise HTTPException(status_code=400, detail=f"Request value not found: {projection.match_request}")
+    for frame in reversed(projection.history):
+        frame_value = _lookup(_frame_scope(frame), projection.match_frame)
+        if frame_value == request_value or (frame_value is not None and str(frame_value) == str(request_value)):
+            return frame
+    raise HTTPException(status_code=projection.not_found_status, detail="No simulated record matched the request.")
+
+
 def _response_payload(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> Any:
-    frame = projection.current
+    frame = _selected_frame(projection, path_params, query, body)
     if projection.response_mode == "template":
         payload = _render_template(projection.response_template, _request_scope(frame, path_params, query, body))
     else:
