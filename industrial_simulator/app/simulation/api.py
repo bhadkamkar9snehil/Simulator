@@ -43,8 +43,14 @@ def capabilities() -> dict[str, Any]:
             "dataset_storage": ["csv", "xlsx", "parquet", "parquet_folder"],
         },
         "targets": {
-            "implemented": ["opcua", "mqtt", "http", "sql_server", "odata", "memory"],
+            "implemented": ["opcua", "api", "mqtt", "http", "sql_server", "odata", "memory"],
             "planned": ["modbus_tcp", "kafka"],
+        },
+        "api_target": {
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+            "response_modes": ["values", "frame", "record", "history", "template"],
+            "template_scopes": ["values", "context", "meta", "path", "query", "body"],
+            "public_prefix": "/sim-api",
         },
         "controls": ["start", "pause", "resume", "stop", "restart", "reset_cursor", "seek"],
         "hosting_modes": ["shared", "dedicated"],
