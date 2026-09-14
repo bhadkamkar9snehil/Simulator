@@ -28,6 +28,7 @@ REQUIRED_FILES = {
     "portal/ui/model.js",
     "portal/ui/render.js",
     "portal/ui/app.js",
+    "portal/ui/session.js",
     "industrial_simulator/main.py",
     "industrial_simulator/app/sql_server_helper.ps1",
 }
