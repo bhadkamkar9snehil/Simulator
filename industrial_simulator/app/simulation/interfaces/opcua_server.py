@@ -3,26 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.models import ReplayConfig, TagMapping
 from app.opcua_server import OpcUaTagServer, Server, ua
 from app.opcua_support import (
     FixtureUserManager,
-    coerce_value,
     identity_tokens,
-    initial_value,
     normalize_server_options,
-    opcua_timestamp,
     public_server_options,
     security_policy_types,
-    status_code,
-    variant_type,
 )
-from app.models import ReplayConfig
 
-from ..models import SignalDefinition, utc_now_iso
+from ..models import SignalDefinition
 
 
 class UnifiedOpcUaServer(OpcUaTagServer):
-    """Unified-runtime OPC UA server with explicit security and scalar types."""
+    """Security/auth specialization of the shared OPC UA host primitive.
+
+    Datatype conversion, node creation, diagnostics, update semantics and server-loop
+    ownership remain in ``OpcUaTagServer``. The unified runtime adds only server
+    security/auth configuration plus adapters from ``SignalDefinition``.
+    """
 
     def __init__(
         self,
@@ -66,6 +66,7 @@ class UnifiedOpcUaServer(OpcUaTagServer):
             self.server.set_security_IDs(policy_ids)
 
         self.idx = await self.server.register_namespace(self.namespace_uri)
+        self._diagnostics_attached = self.diagnostics.attach(self.server)
         await self.server.start()
         self.running = True
 
@@ -95,138 +96,33 @@ class UnifiedOpcUaServer(OpcUaTagServer):
         data_types: dict[str, str],
         writable_signals: set[str],
     ) -> None:
-        if not self.mock_mode and self.server is not None:
-            await self._run_in_server_loop(
-                self._configure_signals_impl(
-                    namespace_uri,
-                    root_folder,
-                    schema,
-                    node_map,
-                    data_types,
-                    writable_signals,
-                )
+        """Adapt unified signal definitions into the canonical tag configuration path."""
+        tags = [
+            TagMapping(
+                enabled=True,
+                csv_column=signal.name,
+                tag_name=signal.name,
+                node_id=node_map[signal.name],
+                data_type=data_types[signal.name],
+                initial_value=signal.initial_value,
+                writable=signal.name in writable_signals,
             )
-            return
-        await self._configure_signals_impl(
-            namespace_uri,
-            root_folder,
-            schema,
-            node_map,
-            data_types,
-            writable_signals,
+            for signal in schema
+        ]
+        config = ReplayConfig(
+            protocol="opcua",
+            namespace_uri=namespace_uri,
+            root_folder=root_folder,
+            tags=tags,
         )
-
-    async def _configure_signals_impl(
-        self,
-        namespace_uri: str,
-        root_folder: str,
-        schema: list[SignalDefinition],
-        node_map: dict[str, str],
-        data_types: dict[str, str],
-        writable_signals: set[str],
-    ) -> None:
-        self.namespace_uri = namespace_uri
-        self.variables.clear()
-        node_ids = [str(node_map[signal.name]).strip() for signal in schema]
-        if any(not node_id for node_id in node_ids):
-            raise ValueError("Every enabled OPC UA tag requires a non-empty NodeId.")
-        if len(node_ids) != len(set(node_ids)):
-            raise ValueError("Enabled OPC UA tags must use unique NodeIds.")
-
-        if self.mock_mode or self.server is None:
-            for signal in schema:
-                data_type = data_types[signal.name]
-                self.variables[node_map[signal.name]] = {
-                    "value": initial_value(data_type, signal.initial_value),
-                    "signal": signal,
-                    "data_type": data_type,
-                    "writable": signal.name in writable_signals,
-                    "quality": "GOOD",
-                    "source_timestamp": None,
-                }
-            return
-
-        self.idx = await self.server.register_namespace(namespace_uri)
-        self.root_folder = await self.server.nodes.objects.add_folder(self.idx, root_folder)
-        used_names: set[str] = set()
-        for signal in schema:
-            node_id = node_map[signal.name]
-            data_type = data_types[signal.name]
-            browse_name = self._browse_name(node_id, signal.name, used_names)
-            value = initial_value(data_type, signal.initial_value)
-            var = await self.root_folder.add_variable(
-                ua.NodeId(str(node_id).strip(), self.idx),
-                browse_name,
-                value,
-                varianttype=variant_type(data_type),
-            )
-            if signal.name in writable_signals:
-                await var.set_writable()
-            self.variables[node_id] = var
+        await self.configure_tags(config)
 
     async def update_signals(
         self,
-        values: dict[str, tuple[Any, str, str | None, str | None]],
+        values: dict[str, tuple[Any, str, str | int | None, str | None]],
     ) -> None:
-        if not self.mock_mode and self.server is not None:
-            await self._run_in_server_loop(self._update_signals_impl(values))
-            return
-        await self._update_signals_impl(values)
-
-    async def _update_signals_impl(
-        self,
-        values: dict[str, tuple[Any, str, str | None, str | None]],
-    ) -> None:
-        for node_id, (value, data_type, quality, source_timestamp) in values.items():
-            var = self.variables.get(node_id)
-            if var is None:
-                continue
-            typed = coerce_value(value, data_type)
-            timestamp = opcua_timestamp(source_timestamp)
-            if self.mock_mode:
-                var["value"] = typed
-                var["data_type"] = data_type
-                var["quality"] = quality or "GOOD"
-                var["source_timestamp"] = timestamp
-                continue
-            data_value = ua.DataValue(
-                ua.Variant(typed, variant_type(data_type)),
-                StatusCode=status_code(quality),
-                SourceTimestamp=timestamp,
-                ServerTimestamp=opcua_timestamp(utc_now_iso()),
-            )
-            await var.write_value(data_value)
-
-    async def _configure_tags_impl(self, config: ReplayConfig) -> None:
-        data_types = {tag.tag_name: tag.data_type for tag in config.tags if tag.enabled}
-        writable = {tag.tag_name for tag in config.tags if tag.enabled and tag.writable}
-        schema = [
-            SignalDefinition(
-                name=tag.tag_name,
-                node_id=tag.node_id,
-                data_type=tag.data_type,
-                initial_value=tag.initial_value,
-                writable=tag.writable,
-            )
-            for tag in config.tags
-            if tag.enabled
-        ]
-        node_map = {signal.name: signal.node_id for signal in schema}
-        await self._configure_signals_impl(
-            config.namespace_uri,
-            config.root_folder,
-            schema,
-            node_map,
-            data_types,
-            writable,
-        )
-
-    async def _update_values_impl(self, values: dict[str, tuple[Any, str]]) -> None:
-        converted = {
-            node_id: (value, data_type, "GOOD", None)
-            for node_id, (value, data_type) in values.items()
-        }
-        await self._update_signals_impl(converted)
+        """Use the canonical host update path; no unified-runtime conversion fork."""
+        await self.update_values(values)
 
     def get_status(self) -> dict[str, Any]:
         base = super().get_status()
