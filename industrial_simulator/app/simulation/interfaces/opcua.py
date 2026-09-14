@@ -61,6 +61,7 @@ class _SharedOpcUaHost:
     namespace_index: int | None = None
     root_folder: Any = None
     groups: dict[str, _SharedGroup] = field(default_factory=dict)
+    pending_acquires: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -99,13 +100,13 @@ class InterfaceHostManager:
 
         async with host.lock:
             await _remove_shared_group(host, handle.member_key)
-            if host.groups:
+            if host.groups or host.pending_acquires:
                 return
             await host.server.stop()
 
         async with self._manager_lock:
             current = self._shared_opcua.get(handle.key)
-            if current is host and not host.groups:
+            if current is host and not host.groups and not host.pending_acquires:
                 self._shared_opcua.pop(handle.key, None)
 
     async def publish_opcua(self, handle: OpcUaHandle, frame: SimulationFrame) -> None:
@@ -155,6 +156,7 @@ class InterfaceHostManager:
                     "path": host.path,
                     "namespace_uri": host.namespace_uri,
                     "root_folder": host.root_folder_name,
+                    "pending_targets": host.pending_acquires,
                     "simulation_targets": [
                         {
                             "member_key": member_key,
@@ -172,6 +174,7 @@ class InterfaceHostManager:
                     "writable_count": sum(group.writable_count for group in host.groups.values()),
                 }
                 for key, host in self._shared_opcua.items()
+                if host.groups or host.server.running or host.pending_acquires
             },
             "dedicated_opcua_hosts": {
                 member_key: {
@@ -210,7 +213,11 @@ class InterfaceHostManager:
             if any(handle.port == port for handle in self._dedicated_opcua.values()):
                 raise ValueError(f"OPC UA port {port} is already reserved by a dedicated target.")
             conflicting_shared = next(
-                (item for item in self._shared_opcua.values() if item.port == port and item.key != key),
+                (
+                    item
+                    for item in self._shared_opcua.values()
+                    if item.port == port and item.key != key and (item.groups or item.server.running or item.pending_acquires)
+                ),
                 None,
             )
             if conflicting_shared is not None:
@@ -218,6 +225,9 @@ class InterfaceHostManager:
                     f"OPC UA port {port} is already reserved by shared listener {conflicting_shared.key}."
                 )
             host = self._shared_opcua.get(key)
+            if host is not None and not host.groups and not host.server.running and not host.pending_acquires:
+                self._shared_opcua.pop(key, None)
+                host = None
             if host is None:
                 host = _SharedOpcUaHost(
                     key=key,
@@ -235,8 +245,8 @@ class InterfaceHostManager:
                     server_options=server_options,
                 )
                 self._shared_opcua[key] = host
-
-        _validate_shared_host(host, path, advertised_host, namespace_uri, root_folder, server_options)
+            _validate_shared_host(host, path, advertised_host, namespace_uri, root_folder, server_options)
+            host.pending_acquires += 1
 
         try:
             async with host.lock:
@@ -257,13 +267,10 @@ class InterfaceHostManager:
                     folder_name,
                 )
         except Exception:
-            async with self._manager_lock:
-                if not host.groups and self._shared_opcua.get(key) is host:
-                    self._shared_opcua.pop(key, None)
-            if not host.groups:
-                await host.server.stop()
+            await self._finish_shared_acquire(host, failed=True)
             raise
 
+        await self._finish_shared_acquire(host, failed=False)
         return OpcUaHandle(
             key,
             member_key,
@@ -277,6 +284,16 @@ class InterfaceHostManager:
             folder_name,
             len(writable),
         )
+
+    async def _finish_shared_acquire(self, host: _SharedOpcUaHost, *, failed: bool) -> None:
+        async with self._manager_lock:
+            host.pending_acquires = max(0, host.pending_acquires - 1)
+            should_stop = failed and not host.groups and not host.pending_acquires
+        if not should_stop:
+            return
+        async with host.lock:
+            if not host.groups and not host.pending_acquires and host.server.running:
+                await host.server.stop()
 
     async def _acquire_dedicated(
         self,
@@ -321,7 +338,7 @@ class InterfaceHostManager:
         async with self._manager_lock:
             if member_key in self._dedicated_opcua:
                 raise ValueError(f"Dedicated OPC UA target already exists: {member_key}")
-            if any(host.port == port for host in self._shared_opcua.values()):
+            if any(host.port == port and (host.groups or host.server.running or host.pending_acquires) for host in self._shared_opcua.values()):
                 raise ValueError(f"OPC UA port {port} is already reserved by a shared listener.")
             if any(existing.port == port for existing in self._dedicated_opcua.values()):
                 raise ValueError(f"OPC UA port {port} is already reserved by another dedicated target.")
