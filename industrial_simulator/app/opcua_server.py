@@ -20,7 +20,7 @@ from app.opcua_types import coerce_value, data_value, default_value, variant_typ
 
 try:
     from asyncua import Server, ua  # type: ignore
-except Exception:  # pragma: no cover - fallback for environments without asyncua
+except Exception:  # pragma: no cover - surfaced explicitly at server start
     Server = None
     ua = None
 
@@ -105,9 +105,12 @@ class OpcUaTagServer:
         _prepare_asyncua_python314_type_hints()
         self.diagnostics.reset()
         if Server is None:
-            self.running = True
             self.mock_mode = True
-            return
+            raise RuntimeError(
+                "OPC UA simulation is unavailable because asyncua could not be imported. "
+                "Install the required runtime dependencies instead of running a silent mock server."
+            )
+        self.mock_mode = False
         await self._run_in_server_loop(self._start_impl())
 
     async def _start_impl(self) -> None:
@@ -264,7 +267,7 @@ class OpcUaTagServer:
             "server_loop_running": bool(self._loop is not None and self._loop.is_running()),
             "server_thread_alive": bool(self._thread is not None and self._thread.is_alive()),
             "python314_asyncua_compat": _ASYNCUA_314_HINTS_READY,
-            "diagnostics_available": self.mock_mode or self._diagnostics_attached,
+            "diagnostics_available": self._diagnostics_attached,
             "diagnostics": diagnostics,
         }
 
