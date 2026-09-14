@@ -16,8 +16,8 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 | ID | Priority | Status | Issue | Required outcome |
 |---|---|---|---|---|
 | P0-01 | P0 | FIXED | Duplicate OPC UA datatype implementations (`opcua_types.py` and datatype logic in `opcua_support.py`) | `opcua_types.py` is now the single canonical OPC UA coercion/Variant/StatusCode/default implementation. `opcua_support.py` retains compatibility facades only. |
-| P0-02 | P0 | IN PROGRESS | Legacy and unified OPC UA server implementations have overlapping ownership | Unified runtime/InterfaceHostManager becomes canonical; legacy replay becomes compatibility-facing rather than an equal implementation. |
-| P0-03 | P0 | OPEN | `DataType = str` weakens validation outside `TagMapping` | Validate supported scalar/array OPC UA types at shared model boundaries. |
+| P0-02 | P0 | FIXED | Legacy and unified OPC UA server implementations had overlapping node/update ownership | `OpcUaTagServer` is the low-level host primitive. `UnifiedOpcUaServer` is now a thin security/auth + unified-model adapter; it no longer duplicates node creation/update/type behavior. |
+| P0-03 | P0 | IN PROGRESS | `DataType = str` weakens validation outside `TagMapping` | Validate supported scalar/array OPC UA types at shared model boundaries. |
 | P0-04 | P0 | OPEN | `type_inference.convert_value()` is still an execution-time conversion path | Type inference remains inference-only; OPC UA execution uses the canonical type layer. |
 | P0-05 | P0 | OPEN | StatusCode semantics differ between legacy and unified runtimes | Exact named/numeric quality semantics are shared; invalid quality never silently becomes Good. |
 | P1-01 | P1 | OPEN | `quality_column` and `source_timestamp_column` are configuration without complete replay behavior | Wire both through replay or remove them. |
@@ -52,3 +52,12 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 - Unified type overrides now accept the same scalar and array syntax as the canonical layer.
 - Updated support tests to exercise canonical array and strict integer-range behavior through the compatibility facade.
 - Ownership rule: OPC UA datatype semantics have one owner: `app/opcua_types.py`.
+
+### P0-02 — shrink unified OPC UA server specialization — `53c2d42`
+
+- Removed duplicate unified-runtime node creation and value-update implementations.
+- `UnifiedOpcUaServer.configure_signals()` now translates unified signal definitions into the canonical `ReplayConfig`/`TagMapping` path owned by `OpcUaTagServer`.
+- `UnifiedOpcUaServer.update_signals()` now delegates directly to the canonical host update path.
+- Retained only behavior that is genuinely specific to the unified host: per-target security/auth configuration and translation from unified models.
+- Attached the common diagnostics component in the secured unified start path as well.
+- Ownership rule: `OpcUaTagServer` owns OPC UA node/update mechanics; `InterfaceHostManager` owns shared/dedicated host lifecycle; `UnifiedOpcUaServer` is a narrow specialization rather than a parallel implementation.
