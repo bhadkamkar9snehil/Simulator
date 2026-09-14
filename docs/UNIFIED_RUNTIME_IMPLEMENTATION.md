@@ -1,7 +1,8 @@
 # Unified Runtime Implementation Status
 
 **Status:** active migration / alpha architecture  
-**Normative requirements:** [UNIFIED_SIMULATOR_REQUIREMENTS.md](UNIFIED_SIMULATOR_REQUIREMENTS.md)
+**Normative requirements:** [UNIFIED_SIMULATOR_REQUIREMENTS.md](UNIFIED_SIMULATOR_REQUIREMENTS.md)  
+**Prioritized backlog:** [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md)
 
 This file records what is actually implemented. It must not describe temporary limitations that no longer exist.
 
@@ -66,15 +67,54 @@ Implemented behavior includes:
 - real configurable bind host;
 - advertised host, port and endpoint path;
 - namespace URI and root folder configuration;
+- configurable shared per-target group folder;
+- configurable shared per-target NodeId prefix;
 - configured client-visible string NodeIds;
 - duplicate/empty NodeId validation;
 - collision-safe simulation + target identity;
 - incremental shared-host group add/remove without restarting unrelated simulations;
-- transactional group creation/rollback;
+- transactional shared-group creation/rollback;
 - shared/dedicated socket conflict detection before bind;
-- explicit failure when the OPC UA stack is unavailable rather than a production mock-success mode.
+- explicit failure when the OPC UA stack is unavailable rather than a production mock-success mode;
+- configurable server name and Application URI;
+- generated local server certificate/key or explicit certificate/private-key file paths;
+- `None`, `Basic256Sha256 Sign`, `Basic256Sha256 SignAndEncrypt`, combined secure modes, and a mixed NoSecurity + secure mode;
+- anonymous, username/password, or anonymous-or-username identity modes for simulation fixtures;
+- host-level security/identity compatibility checks before a Simulation Instance joins an existing shared listener;
+- per-target writable-signal selection;
+- per-target OPC UA scalar type overrides without changing the protocol-neutral canonical frame model;
+- explicit variable creation/write types for `Double`, `Float`, signed and unsigned 16/32/64-bit integers, `Boolean`, `String`, and `DateTime`;
+- live host/member/tag/writable/security/authentication diagnostics.
 
-Shared-host NodeIds are intentionally scoped/prefixed to prevent collisions between simulations. Dedicated endpoints use configured NodeIds directly.
+Shared-host NodeIds are intentionally scoped/prefixed to prevent collisions between simulations unless an explicit per-target prefix is supplied. Dedicated endpoints use configured canonical NodeIds directly.
+
+### Writable-node semantics
+
+Writable nodes are an interface behavior, not a second source of simulation truth.
+
+- only signals explicitly marked writable for that OPC UA target accept client writes;
+- a client write changes the live OPC UA variable;
+- the next canonical frame emitted by the Simulation Instance writes the simulated value again;
+- in `hold_last`, after the finite source is exhausted no additional frame is emitted, so a client write can remain visible until restart/stop or another simulator update.
+
+This deliberately avoids a second write-back state machine. If a future use case requires client writes to alter the source/canonical simulation state, that is a separate product requirement.
+
+### OPC UA validation boundary
+
+The code now has isolated tests for host ownership, conflicts, NodeIds, security configuration, per-target type/writable options, and value coercion. That does **not** replace real protocol validation.
+
+Still required before calling OPC UA product-ready:
+
+- local Windows run with the bundled Python/asyncua environment;
+- two or more simultaneous shared Simulation Instances observed from a real OPC UA client;
+- simultaneous dedicated endpoints;
+- browse/read/subscription behavior against actual configured NodeIds/types;
+- secure endpoint discovery/connection for the supported Basic256Sha256 modes;
+- username authentication against a real client;
+- writable-node behavior from a real client;
+- stop/restart/member-removal verification while unrelated shared members remain subscribed.
+
+No GitHub Actions or GitHub-hosted CI is used for this validation.
 
 ## REST API simulation
 
@@ -85,18 +125,24 @@ Each API target owns one public route under `/sim-api` and supports:
 - GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS;
 - arbitrary route paths and named path parameters;
 - query and request-body values available to response templates;
-- required request headers;
-- response headers;
-- configurable response delay;
-- configurable success/no-data status codes;
+- exact required request headers and declarative required path/query/body values;
+- response headers with request/simulation template values;
+- fixed response delay plus optional jitter;
+- configurable success/no-data/not-found/request-rejection status codes;
 - current values, canonical frame, flat record, retained history or custom JSON response modes;
+- JSON, text/XML/custom-text and explicitly empty success bodies;
+- configurable default/custom JSON/custom text/empty error bodies;
 - field selection, context/system-field inclusion and response envelopes;
-- typed template references to values/context/path/query/body/frame metadata;
-- request count, last-request and history metrics.
+- typed template references to values/context/path/query/body/frame metadata plus error status/message;
+- request-driven retained-history lookup without moving the Simulation cursor;
+- bounded retained history with offset/limit paging and oldest/newest ordering;
+- request count, status-class counters, last status, last request time and latency metrics.
 
 See [API_SIMULATION.md](API_SIMULATION.md).
 
 Requests do not advance a source. API, OPC UA, MQTT, SQL and OData attached to one Simulation Instance therefore observe one shared simulated timeline.
+
+The API simulator intentionally does not include a built-in tester, validator workspace, generic mock-project subsystem or embedded scripting language.
 
 ## Other implemented targets
 
@@ -133,6 +179,16 @@ Configurable behavior:
 - `continue`, `retry`, `stop_simulation` failure policy;
 - retry delay.
 
+Runtime target status includes:
+
+- queue depth;
+- emitted/published frames;
+- dropped frames;
+- retry count;
+- last successful delivery time;
+- last publish latency;
+- last error.
+
 One unhealthy target therefore does not inherently stop healthy siblings.
 
 ## Lifecycle and timing
@@ -158,6 +214,8 @@ Loop modes:
 - loop forever;
 - hold last;
 - ping-pong.
+
+`hold_last` keeps targets/interfaces alive after a finite source is exhausted without continuously re-emitting duplicate copies of the final frame.
 
 Cursor changes drain target queues first and use a source-generation guard so a frame read before a seek cannot leak after resume.
 
@@ -211,14 +269,13 @@ The migration strategy is caller migration followed by deletion, not parallel fe
 
 ## Current known work
 
-1. complete local Windows end-to-end validation of concurrent OPC UA and API targets;
-2. continue UI/UX refinement and rendered visual QA;
-3. surface adapter validation in the UI before Start instead of waiting for target startup errors;
-4. populate the newer retry/success/latency target-delivery metrics in `_TargetRunner`;
-5. migrate remaining legacy replay/workload callers to `SimulationManager` and delete protocol-combination layers;
-6. consolidate remaining duplicate background-worker/job-control logic;
-7. reduce remaining high-complexity generator and asyncua compatibility functions;
-8. add dedicated HTTP/API listener support only if a concrete integration requires per-target bind/port isolation;
-9. add richer API response/error rules only for concrete integration needs rather than introducing a scripting engine.
+The authoritative prioritized list is [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). Immediate remaining work is intentionally narrower than the earlier alpha list:
+
+1. complete local Windows end-to-end validation of concurrent shared/dedicated OPC UA with a real client, including security/auth/writes;
+2. complete rendered UI/UX QA and refinement of the simulation/target workspace;
+3. stress target isolation/backpressure and large-source behavior locally;
+4. migrate remaining legacy replay/workload callers to `SimulationManager` and delete protocol-combination layers;
+5. reduce or eliminate the Python 3.14/asyncua compatibility patch once real-runtime validation identifies what the bundled asyncua version actually still requires;
+6. add additional protocols/sources only for concrete integration needs.
 
 Every migration should reduce duplicate code or concepts. New abstractions must earn their existence through more than one real implementation or a clear reduction in complexity.
