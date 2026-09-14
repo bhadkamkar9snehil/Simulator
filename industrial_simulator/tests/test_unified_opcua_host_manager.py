@@ -9,9 +9,15 @@ from app.simulation.models import SignalDefinition, SignalValue, SimulationFrame
 class _FakeOpcUaServer:
     instances: list["_FakeOpcUaServer"] = []
 
-    def __init__(self, endpoint: str | None = None, advertised_endpoint: str | None = None):
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        advertised_endpoint: str | None = None,
+        server_options: dict | None = None,
+    ):
         self.endpoint = endpoint or "opc.tcp://0.0.0.0:4840/simulator"
         self.advertised_endpoint = advertised_endpoint or "opc.tcp://localhost:4840/simulator"
+        self.server_options = dict(server_options or {})
         self.running = False
         self.mock_mode = True
         self.server = None
@@ -34,7 +40,7 @@ class _FakeOpcUaServer:
     async def configure_tags(self, config) -> None:
         self.configured = config
         for tag in config.tags:
-            self.variables[tag.node_id] = {"value": tag.initial_value}
+            self.variables[tag.node_id] = {"value": tag.initial_value, "tag": tag}
 
     async def update_values(self, values) -> None:
         for node_id, (value, _data_type) in values.items():
@@ -42,14 +48,19 @@ class _FakeOpcUaServer:
                 self.variables[node_id]["value"] = value
 
     def get_status(self) -> dict:
-        return {"running": self.running, "endpoint": self.advertised_endpoint}
+        return {
+            "running": self.running,
+            "endpoint": self.advertised_endpoint,
+            "security_policy": self.server_options.get("security_policy", "none"),
+            "authentication": self.server_options.get("authentication", "anonymous"),
+        }
 
     def get_endpoint(self) -> str:
         return self.advertised_endpoint
 
 
 SCHEMA = [
-    SignalDefinition(name="pressure", node_id="pressure", data_type="Double"),
+    SignalDefinition(name="pressure", node_id="pressure", data_type="Double", writable=True),
     SignalDefinition(name="running", node_id="running", data_type="Boolean"),
 ]
 
@@ -72,6 +83,8 @@ def _shared_binding(target_id: str = "opcua", port: int = 4840) -> TargetBinding
             "path": "simulator",
             "namespace_uri": "http://local/unified-simulator",
             "root_folder": "Simulations",
+            "security_policy": "none",
+            "authentication": "anonymous",
         },
     )
 
@@ -86,6 +99,8 @@ def _dedicated_binding(target_id: str = "opcua", port: int = 4842) -> TargetBind
             "advertised_host": "test-host",
             "port": port,
             "path": "line-a",
+            "security_policy": "none",
+            "authentication": "anonymous",
         },
     )
 
@@ -108,6 +123,7 @@ def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) 
         assert status["simulation_count"] == 2
         assert status["target_count"] == 2
         assert status["tag_count"] == 4
+        assert status["writable_count"] == 2
 
         await manager.publish_opcua(
             first,
@@ -146,6 +162,8 @@ def test_same_target_id_is_scoped_per_simulation(monkeypatch) -> None:
             "simulation_id",
             "target_id",
             "tag_count",
+            "folder",
+            "writable_count",
         }
         await manager.shutdown()
 
@@ -168,6 +186,68 @@ def test_shared_listener_rejects_conflicting_host_level_settings(monkeypatch) ->
             raise AssertionError("Expected shared host configuration conflict")
         assert first.server.running is True
         assert first.server.stop_count == 0
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_shared_listener_rejects_conflicting_security(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        first = await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding(), SCHEMA)
+        conflicting = _shared_binding("secure")
+        conflicting.config["security_policy"] = "basic256sha256_sign_encrypt"
+        try:
+            await manager.acquire_opcua("sim-b", "Simulation B", conflicting, SCHEMA)
+        except ValueError as exc:
+            assert "security_policy" in str(exc)
+        else:
+            raise AssertionError("Expected shared security configuration conflict")
+        assert first.server.running is True
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_shared_listener_uses_custom_prefix_and_group_folder(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        binding = _shared_binding()
+        binding.config["node_id_prefix"] = "Plant1.Line2"
+        binding.config["group_folder"] = "{simulation_name}-{target_id}"
+        handle = await manager.acquire_opcua("sim-a", "Mixer A", binding, SCHEMA)
+        assert handle.node_map["pressure"] == "Plant1.Line2.pressure"
+        assert handle.folder_name == "Mixer_A-opcua"
+        assert handle.writable_count == 1
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_username_authentication_is_passed_to_server(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        binding = _dedicated_binding()
+        binding.config.update({
+            "security_policy": "basic256sha256_sign_encrypt",
+            "authentication": "username",
+            "username": "operator",
+            "password": "sim-password",
+        })
+        handle = await manager.acquire_opcua("sim-a", "Simulation A", binding, SCHEMA)
+        assert handle.server.server_options["security_policy"] == "basic256sha256_sign_encrypt"
+        assert handle.server.server_options["authentication"] == "username"
+        assert handle.server.server_options["username"] == "operator"
+        assert handle.server.server_options["password"] == "sim-password"
+        status = manager.status()["dedicated_opcua_hosts"]["sim-a/opcua"]
+        assert status["security_policy"] == "basic256sha256_sign_encrypt"
+        assert status["authentication"] == "username"
         await manager.shutdown()
 
     asyncio.run(exercise())
