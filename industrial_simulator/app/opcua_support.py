@@ -114,6 +114,15 @@ def identity_tokens(authentication: str) -> list[Any]:
     return tokens
 
 
+def _user(name: str | None = None) -> Any:
+    if User is None or UserRole is None:
+        return None
+    try:
+        return User(role=UserRole.User, name=name) if name else User(role=UserRole.User)
+    except TypeError:  # older asyncua User constructor
+        return User(role=UserRole.User)
+
+
 class FixtureUserManager:
     """Small credential fixture for simulator endpoints, not an account system."""
 
@@ -129,15 +138,11 @@ class FixtureUserManager:
         password: str | None = None,
         certificate: Any = None,
     ) -> Any:
-        if User is None or UserRole is None:
-            return None
         if username is None:
-            if self.authentication in {"anonymous", "anonymous_or_username"}:
-                return User(role=UserRole.User)
-            return None
+            return _user() if self.authentication in {"anonymous", "anonymous_or_username"} else None
         if self.authentication in {"username", "anonymous_or_username"}:
             if username == self.username and password == self.password:
-                return User(role=UserRole.User, name=username)
+                return _user(username)
         return None
 
 
