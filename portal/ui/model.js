@@ -250,6 +250,10 @@ export function addTarget(definition, kind, opcuaPort = 4840) {
     response_headers: "",
     response_template: "{\n  \"simulation_id\": \"${meta.simulation_id}\",\n  \"sequence\": \"${meta.sequence}\",\n  \"temperature\": \"${values.Temperature}\"\n}",
     text_template: "Simulation ${meta.simulation_id} sequence ${meta.sequence}",
+    error_mode: "default",
+    error_media_type: "application/json",
+    error_template: "{\n  \"error\": \"${error.message}\",\n  \"status\": \"${error.status}\"\n}",
+    error_text_template: "${error.status} ${error.message}",
   };
   if (kind === "http") common.config = {};
   if (kind === "sql_server") common.config = { server: "localhost", port: 1433, database: "Simulator", table: "dbo.tag_snapshots", auth: "windows", batch_size: 100 };
