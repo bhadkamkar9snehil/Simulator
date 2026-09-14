@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from app.models import ReplayConfig
+from app.opcua_diagnostics import OpcUaDiagnostics
+from app.opcua_types import coerce_value, data_value, default_value, variant_type
 
 try:
     from asyncua import Server, ua  # type: ignore
@@ -27,18 +29,10 @@ _ASYNCUA_314_HINTS_READY = False
 
 
 def _prepare_asyncua_python314_type_hints() -> None:
-    """Normalize asyncua 1.1.x generated annotations once on Python 3.14.
-
-    Python 3.14 can resolve a generated annotation such as ``RequestHeader``
-    against a same-named property on the dataclass. Normalizing the annotation
-    itself lets asyncua's own serializers/deserializers run unchanged.
-
-    Remove this shim when the offline wheelhouse moves to asyncua >= 1.2.
-    """
+    """Normalize asyncua 1.1.x generated annotations once on Python 3.14."""
     global _ASYNCUA_314_HINTS_READY
     if _ASYNCUA_314_HINTS_READY or ua is None or sys.version_info < (3, 14):
         return
-
     changed = False
     for candidate in vars(ua).values():
         if not isinstance(candidate, type) or not is_dataclass(candidate):
@@ -47,11 +41,7 @@ def _prepare_asyncua_python314_type_hints() -> None:
         annotations = getattr(candidate, "__annotations__", None)
         if module is None or not isinstance(annotations, dict):
             continue
-        localns = {
-            name: value
-            for name, value in vars(candidate).items()
-            if not isinstance(value, property)
-        }
+        localns = {name: value for name, value in vars(candidate).items() if not isinstance(value, property)}
         try:
             hints = typing.get_type_hints(candidate, vars(module), localns)
         except Exception:
@@ -64,16 +54,9 @@ def _prepare_asyncua_python314_type_hints() -> None:
                 annotations[field_info.name] = resolved
                 changed = True
             field_info.type = resolved
-
     if changed:
         from asyncua.ua import ua_binary  # type: ignore
-
-        for name in (
-            "create_dataclass_serializer",
-            "create_type_serializer",
-            "_create_dataclass_deserializer",
-            "_create_type_deserializer",
-        ):
+        for name in ("create_dataclass_serializer", "create_type_serializer", "_create_dataclass_deserializer", "_create_type_deserializer"):
             cache_clear = getattr(getattr(ua_binary, name, None), "cache_clear", None)
             if cache_clear:
                 cache_clear()
@@ -89,7 +72,7 @@ def get_base_dir() -> Path:
 
 
 class OpcUaTagServer:
-    """Single-root OPC UA server for legacy replay callers."""
+    """OPC UA replay server with explicit datatype fidelity and lightweight diagnostics."""
 
     def __init__(self, endpoint: str | None = None, advertised_endpoint: str | None = None):
         raw_port = str(os.environ.get("OPCUA_PORT", "4840")).strip()
@@ -105,10 +88,13 @@ class OpcUaTagServer:
         self.idx: int | None = None
         self.root_folder: Any = None
         self.variables: dict[str, Any] = {}
+        self.tag_specs: dict[str, Any] = {}
         self.running = False
         self.mock_mode = Server is None
         self.security_policy = "None"
         self.certificate_path: str | None = None
+        self.diagnostics = OpcUaDiagnostics()
+        self._diagnostics_attached = False
         self._loop: Any = None
         self._thread: threading.Thread | None = None
         self._thread_lock = threading.Lock()
@@ -117,6 +103,7 @@ class OpcUaTagServer:
         if self.running:
             return
         _prepare_asyncua_python314_type_hints()
+        self.diagnostics.reset()
         if Server is None:
             self.running = True
             self.mock_mode = True
@@ -134,6 +121,7 @@ class OpcUaTagServer:
             await self._maybe_await(self.server.set_application_uri(self.application_uri))
         await self._configure_uaexpert_friendly_no_security()
         self.idx = await self.server.register_namespace(self.namespace_uri)
+        self._diagnostics_attached = self.diagnostics.attach(self.server)
         await self.server.start()
         self.running = True
 
@@ -149,9 +137,11 @@ class OpcUaTagServer:
             await self.server.stop()
         self.running = False
         self.variables.clear()
+        self.tag_specs.clear()
         self.server = None
         self.root_folder = None
         self.idx = None
+        self._diagnostics_attached = False
 
     async def configure_tags(self, config: ReplayConfig) -> None:
         if not self.mock_mode and self.server is not None:
@@ -162,6 +152,7 @@ class OpcUaTagServer:
     async def _configure_tags_impl(self, config: ReplayConfig) -> None:
         self.namespace_uri = config.namespace_uri
         self.variables.clear()
+        self.tag_specs.clear()
         enabled_tags = [tag for tag in config.tags if tag.enabled]
         node_ids = [str(tag.node_id).strip() for tag in enabled_tags]
         if any(not node_id for node_id in node_ids):
@@ -169,9 +160,19 @@ class OpcUaTagServer:
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("Enabled OPC UA tags must use unique NodeIds.")
 
+        for tag in enabled_tags:
+            self.tag_specs[tag.node_id] = tag
+
         if self.mock_mode or self.server is None:
             for tag in enabled_tags:
-                self.variables[tag.node_id] = {"value": tag.initial_value, "tag": tag}
+                initial = tag.initial_value if tag.initial_value is not None else default_value(tag.data_type)
+                self.variables[tag.node_id] = {
+                    "value": coerce_value(tag.data_type, initial),
+                    "data_type": tag.data_type,
+                    "quality": tag.quality,
+                    "source_timestamp": tag.source_timestamp,
+                    "tag": tag,
+                }
             return
 
         self.idx = await self.server.register_namespace(config.namespace_uri)
@@ -179,38 +180,73 @@ class OpcUaTagServer:
         used_names: set[str] = set()
         for tag in enabled_tags:
             browse_name = self._browse_name(tag.node_id, tag.tag_name, used_names)
-            value = self._initial_value(tag.data_type, tag.initial_value)
-            if ua is None:  # pragma: no cover - real asyncua server implies ua exists
+            initial = tag.initial_value if tag.initial_value is not None else default_value(tag.data_type)
+            coerced = coerce_value(tag.data_type, initial)
+            if ua is None:
                 raise RuntimeError("asyncua UA types are unavailable.")
             var = await self.root_folder.add_variable(
                 ua.NodeId(str(tag.node_id).strip(), self.idx),
                 browse_name,
-                value,
+                ua.Variant(coerced, variant_type(tag.data_type)),
+            )
+            await var.write_attribute(
+                ua.AttributeIds.Value,
+                data_value(tag.data_type, initial, tag.quality, tag.source_timestamp),
             )
             if tag.writable:
                 await var.set_writable()
             self.variables[tag.node_id] = var
 
-    async def update_values(self, values: dict[str, tuple[Any, str]]) -> None:
+    async def update_values(self, values: dict[str, Any]) -> None:
         if not self.mock_mode and self.server is not None:
             await self._run_in_server_loop(self._update_values_impl(values))
             return
         await self._update_values_impl(values)
 
-    async def _update_values_impl(self, values: dict[str, tuple[Any, str]]) -> None:
-        for node_id, (value, _data_type) in values.items():
+    @staticmethod
+    def _normalize_update(payload: Any, tag: Any) -> tuple[Any, str, Any, Any]:
+        if isinstance(payload, dict):
+            return (
+                payload.get("value"),
+                str(payload.get("data_type") or tag.data_type),
+                payload.get("quality", tag.quality),
+                payload.get("source_timestamp", tag.source_timestamp),
+            )
+        if not isinstance(payload, (list, tuple)):
+            return payload, tag.data_type, tag.quality, tag.source_timestamp
+        value = payload[0] if len(payload) > 0 else None
+        data_type = str(payload[1]) if len(payload) > 1 and payload[1] else tag.data_type
+        quality = payload[2] if len(payload) > 2 else tag.quality
+        source_timestamp = payload[3] if len(payload) > 3 else tag.source_timestamp
+        return value, data_type, quality, source_timestamp
+
+    async def _update_values_impl(self, values: dict[str, Any]) -> None:
+        for node_id, payload in values.items():
             var = self.variables.get(node_id)
-            if var is None:
+            tag = self.tag_specs.get(node_id)
+            if var is None or tag is None:
                 continue
+            value, data_type, quality, source_timestamp = self._normalize_update(payload, tag)
+            if data_type != tag.data_type:
+                raise ValueError(f"Datatype change for {node_id} is not allowed: configured {tag.data_type}, got {data_type}.")
+            coerced = coerce_value(data_type, value)
             if self.mock_mode:
-                var["value"] = value
+                var["value"] = coerced
+                var["quality"] = quality
+                var["source_timestamp"] = source_timestamp
             else:
-                await var.write_value(value)
+                if ua is None:
+                    raise RuntimeError("asyncua UA types are unavailable.")
+                await var.write_attribute(
+                    ua.AttributeIds.Value,
+                    data_value(data_type, value, quality, source_timestamp),
+                )
 
     def get_endpoint(self) -> str:
         return self.advertised_endpoint
 
     def get_status(self) -> dict[str, Any]:
+        diagnostics = self.diagnostics.snapshot(self.server)
         return {
             "running": self.running,
             "endpoint": self.advertised_endpoint,
@@ -221,6 +257,8 @@ class OpcUaTagServer:
             "server_loop_running": bool(self._loop is not None and self._loop.is_running()),
             "server_thread_alive": bool(self._thread is not None and self._thread.is_alive()),
             "python314_asyncua_compat": _ASYNCUA_314_HINTS_READY,
+            "diagnostics_available": self.mock_mode or self._diagnostics_attached,
+            "diagnostics": diagnostics,
         }
 
     async def _configure_uaexpert_friendly_no_security(self) -> None:
@@ -248,12 +286,8 @@ class OpcUaTagServer:
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
             from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
-        except Exception as exc:  # pragma: no cover - dependency issue in runtime env
-            raise RuntimeError(
-                "cryptography is required to generate the OPC UA server certificate. "
-                "Run: python -m pip install -r requirements.txt"
-            ) from exc
-
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError("cryptography is required to generate the OPC UA server certificate. Run: python -m pip install -r requirements.txt") from exc
         hostname = socket.gethostname() or "localhost"
         subject = issuer = x509.Name([
             x509.NameAttribute(NameOID.COUNTRY_NAME, "IN"),
@@ -263,52 +297,19 @@ class OpcUaTagServer:
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         now = dt.datetime.now(dt.timezone.utc)
         alt_names: list[x509.GeneralName] = [
-            x509.UniformResourceIdentifier(self.application_uri),
-            x509.DNSName("localhost"),
-            x509.DNSName(hostname),
-            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            x509.IPAddress(ipaddress.ip_address("::1")),
+            x509.UniformResourceIdentifier(self.application_uri), x509.DNSName("localhost"), x509.DNSName(hostname),
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")), x509.IPAddress(ipaddress.ip_address("::1")),
         ]
         cert = (
-            x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(issuer)
-            .public_key(private_key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now - dt.timedelta(days=1))
-            .not_valid_after(now + dt.timedelta(days=3650))
+            x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(days=1)).not_valid_after(now + dt.timedelta(days=3650))
             .add_extension(x509.SubjectAlternativeName(alt_names), critical=False)
             .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-            .add_extension(
-                x509.KeyUsage(
-                    digital_signature=True,
-                    content_commitment=True,
-                    key_encipherment=True,
-                    data_encipherment=True,
-                    key_agreement=False,
-                    key_cert_sign=True,
-                    crl_sign=True,
-                    encipher_only=False,
-                    decipher_only=False,
-                ),
-                critical=True,
-            )
-            .add_extension(
-                x509.ExtendedKeyUsage([
-                    ExtendedKeyUsageOID.SERVER_AUTH,
-                    ExtendedKeyUsageOID.CLIENT_AUTH,
-                ]),
-                critical=False,
-            )
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=True, key_encipherment=True, data_encipherment=True, key_agreement=False, key_cert_sign=True, crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH, ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
             .sign(private_key, hashes.SHA256())
         )
-        key_file.write_bytes(
-            private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
+        key_file.write_bytes(private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.TraditionalOpenSSL, encryption_algorithm=serialization.NoEncryption()))
         cert_file.write_bytes(cert.public_bytes(serialization.Encoding.DER))
         log.info("Generated OPC UA server certificate at %s", cert_file)
 
@@ -323,11 +324,9 @@ class OpcUaTagServer:
             if self._loop is not None and self._thread is not None and self._thread.is_alive():
                 return
             loop = asyncio.new_event_loop()
-
             def run_loop() -> None:
                 asyncio.set_event_loop(loop)
                 loop.run_forever()
-
             self._loop = loop
             self._thread = threading.Thread(target=run_loop, name="OpcUaTagServerLoop", daemon=True)
             self._thread.start()
@@ -360,15 +359,3 @@ class OpcUaTagServer:
             counter += 1
         used_names.add(name)
         return name
-
-    @staticmethod
-    def _initial_value(data_type: str, value: Any) -> Any:
-        if value is not None:
-            return value
-        if data_type == "Double":
-            return 0.0
-        if data_type == "Int64":
-            return 0
-        if data_type == "Boolean":
-            return False
-        return ""
