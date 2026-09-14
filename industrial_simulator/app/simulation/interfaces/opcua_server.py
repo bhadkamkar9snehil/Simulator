@@ -21,6 +21,8 @@ from app.opcua_support import (
 )
 from app.models import ReplayConfig
 
+from ..models import SignalDefinition
+
 
 class UnifiedOpcUaServer(OpcUaTagServer):
     """Unified-runtime OPC UA server with explicit security and scalar types.
@@ -94,40 +96,106 @@ class UnifiedOpcUaServer(OpcUaTagServer):
         self._ensure_certificate_files(cert_file, key_file)
         return cert_file, key_file
 
-    async def _configure_tags_impl(self, config: ReplayConfig) -> None:
-        self.namespace_uri = config.namespace_uri
+    async def configure_signals(
+        self,
+        namespace_uri: str,
+        root_folder: str,
+        schema: list[SignalDefinition],
+        node_map: dict[str, str],
+        data_types: dict[str, str],
+        writable_signals: set[str],
+    ) -> None:
+        if not self.mock_mode and self.server is not None:
+            await self._run_in_server_loop(
+                self._configure_signals_impl(
+                    namespace_uri,
+                    root_folder,
+                    schema,
+                    node_map,
+                    data_types,
+                    writable_signals,
+                )
+            )
+            return
+        await self._configure_signals_impl(
+            namespace_uri,
+            root_folder,
+            schema,
+            node_map,
+            data_types,
+            writable_signals,
+        )
+
+    async def _configure_signals_impl(
+        self,
+        namespace_uri: str,
+        root_folder: str,
+        schema: list[SignalDefinition],
+        node_map: dict[str, str],
+        data_types: dict[str, str],
+        writable_signals: set[str],
+    ) -> None:
+        self.namespace_uri = namespace_uri
         self.variables.clear()
-        enabled_tags = [tag for tag in config.tags if tag.enabled]
-        node_ids = [str(tag.node_id).strip() for tag in enabled_tags]
+        node_ids = [str(node_map[signal.name]).strip() for signal in schema]
         if any(not node_id for node_id in node_ids):
             raise ValueError("Every enabled OPC UA tag requires a non-empty NodeId.")
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("Enabled OPC UA tags must use unique NodeIds.")
 
         if self.mock_mode or self.server is None:
-            for tag in enabled_tags:
-                self.variables[tag.node_id] = {
-                    "value": initial_value(tag.data_type, tag.initial_value),
-                    "tag": tag,
+            for signal in schema:
+                data_type = data_types[signal.name]
+                self.variables[node_map[signal.name]] = {
+                    "value": initial_value(data_type, signal.initial_value),
+                    "signal": signal,
+                    "data_type": data_type,
+                    "writable": signal.name in writable_signals,
                 }
             return
 
-        self.idx = await self.server.register_namespace(config.namespace_uri)
-        self.root_folder = await self.server.nodes.objects.add_folder(self.idx, config.root_folder)
+        self.idx = await self.server.register_namespace(namespace_uri)
+        self.root_folder = await self.server.nodes.objects.add_folder(self.idx, root_folder)
         used_names: set[str] = set()
-        for tag in enabled_tags:
-            browse_name = self._browse_name(tag.node_id, tag.tag_name, used_names)
-            value = initial_value(tag.data_type, tag.initial_value)
+        for signal in schema:
+            node_id = node_map[signal.name]
+            data_type = data_types[signal.name]
+            browse_name = self._browse_name(node_id, signal.name, used_names)
+            value = initial_value(data_type, signal.initial_value)
             var = await self.root_folder.add_variable(
-                ua.NodeId(str(tag.node_id).strip(), self.idx),
+                ua.NodeId(str(node_id).strip(), self.idx),
                 browse_name,
                 value,
-                varianttype=variant_type(tag.data_type),
+                varianttype=variant_type(data_type),
             )
-            if tag.writable:
+            if signal.name in writable_signals:
                 await var.set_writable()
-            self.variables[tag.node_id] = var
+            self.variables[node_id] = var
         _patch_asyncua_python314_property_annotations()
+
+    async def _configure_tags_impl(self, config: ReplayConfig) -> None:
+        data_types = {tag.tag_name: tag.data_type for tag in config.tags if tag.enabled}
+        writable = {tag.tag_name for tag in config.tags if tag.enabled and tag.writable}
+        schema = [
+            SignalDefinition(
+                name=tag.tag_name,
+                node_id=tag.node_id,
+                data_type=tag.data_type,
+                initial_value=tag.initial_value,
+                writable=tag.writable,
+            )
+            for tag in config.tags
+            if tag.enabled
+        ]
+        node_map = {signal.name: signal.node_id for signal in schema}
+        await self._configure_signals_impl(
+            config.namespace_uri,
+            config.root_folder,
+            schema,
+            node_map,
+            data_types,
+            writable,
+        )
 
     async def _update_values_impl(self, values: dict[str, tuple[Any, str]]) -> None:
         for node_id, (value, data_type) in values.items():
