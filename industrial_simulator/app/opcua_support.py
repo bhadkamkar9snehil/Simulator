@@ -32,6 +32,8 @@ OPCUA_DATA_TYPES = {
     "UInt64",
     "UInt32",
     "UInt16",
+    "Byte",
+    "SByte",
     "Boolean",
     "String",
     "DateTime",
@@ -208,6 +210,8 @@ def variant_type(data_type: str) -> Any:
         "UInt64": ua.VariantType.UInt64,
         "UInt32": ua.VariantType.UInt32,
         "UInt16": ua.VariantType.UInt16,
+        "Byte": ua.VariantType.Byte,
+        "SByte": ua.VariantType.SByte,
         "Boolean": ua.VariantType.Boolean,
         "String": ua.VariantType.String,
         "DateTime": ua.VariantType.DateTime,
@@ -215,12 +219,41 @@ def variant_type(data_type: str) -> Any:
     return mapping.get(data_type, ua.VariantType.String)
 
 
+def status_code(quality: str | None) -> Any:
+    if ua is None:
+        return None
+    text = str(quality or "GOOD").strip()
+    normalized = text.replace("_", "").replace(" ", "").lower()
+    if normalized.startswith("bad"):
+        return ua.StatusCode(ua.StatusCodes.Bad)
+    if normalized.startswith("uncertain"):
+        return ua.StatusCode(ua.StatusCodes.Uncertain)
+    if normalized.startswith("good"):
+        return ua.StatusCode(ua.StatusCodes.Good)
+    by_name = {name.lower(): name for name in dir(ua.StatusCodes) if not name.startswith("_")}
+    resolved = by_name.get(text.lower())
+    return ua.StatusCode(getattr(ua.StatusCodes, resolved)) if resolved else ua.StatusCode(ua.StatusCodes.Good)
+
+
+def opcua_timestamp(value: str | dt.datetime | None) -> dt.datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, dt.datetime):
+        parsed = value
+    else:
+        try:
+            parsed = dt.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=dt.timezone.utc)
+
+
 def initial_value(data_type: str, value: Any) -> Any:
     if value is not None:
         return coerce_value(value, data_type)
     if data_type in {"Double", "Float"}:
         return 0.0
-    if data_type in {"Int64", "Int32", "Int16", "UInt64", "UInt32", "UInt16"}:
+    if data_type in {"Int64", "Int32", "Int16", "UInt64", "UInt32", "UInt16", "Byte", "SByte"}:
         return 0
     if data_type == "Boolean":
         return False
@@ -234,19 +267,19 @@ def coerce_value(value: Any, data_type: str) -> Any:
         return None
     if data_type in {"Double", "Float"}:
         return float(value)
-    if data_type in {"Int64", "Int32", "Int16", "UInt64", "UInt32", "UInt16"}:
+    if data_type in {"Int64", "Int32", "Int16", "UInt64", "UInt32", "UInt16", "Byte", "SByte"}:
         number = int(float(value))
-        if data_type.startswith("UInt") and number < 0:
-            raise ValueError(f"{data_type} cannot contain a negative value: {value}")
+        if data_type.startswith("UInt") or data_type == "Byte":
+            if number < 0:
+                raise ValueError(f"{data_type} cannot contain a negative value: {value}")
         return number
     if data_type == "Boolean":
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in {"true", "1", "yes", "y", "on"}
     if data_type == "DateTime":
-        if isinstance(value, dt.datetime):
-            parsed = value
-        else:
-            parsed = dt.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=dt.timezone.utc)
+        parsed = opcua_timestamp(value)
+        if parsed is None:
+            raise ValueError(f"DateTime value is invalid: {value}")
+        return parsed
     return str(value)
