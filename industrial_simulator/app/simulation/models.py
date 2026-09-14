@@ -147,6 +147,9 @@ class TargetRuntimeStatus(BaseModel):
     queue_depth: int = 0
     dropped_frames: int = 0
     published_frames: int = 0
+    retry_count: int = 0
+    last_success_at: str | None = None
+    last_latency_ms: float | None = None
     last_error: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
 
