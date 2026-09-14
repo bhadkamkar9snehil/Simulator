@@ -34,7 +34,7 @@ window.addEventListener('error', event => {
   }
 });
 
-function escapeHtml(v) { return String(v ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s])); }
+function escapeHtml(v) { return String(v ?? '').replace(/[&<>\"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[s])); }
 function fileKey(file) { return `${file.source}:${file.filename}`; }
 function selectedFilesFrom(set) { return [...set].map(key => { const [source, ...rest] = key.split(':'); return {source, filename: rest.join(':')}; }); }
 function selectedNames(set) { return [...set].map(k => k.split(':').slice(1).join(':')).join(', ') || '-'; }
@@ -236,6 +236,7 @@ async function refreshStatus() {
     setText('freqStatus', sim.frequency_hz || '-');
     setText('tagStatus', sim.tag_count || 0);
     setText('rawStatus', JSON.stringify(data, null, 2));
+    if (typeof window.renderOpcUaDiagnostics === 'function') window.renderOpcUaDiagnostics(data);
   } catch (e) { showMessage(e.message || String(e), 'error'); }
 }
 
@@ -291,112 +292,81 @@ async function refreshFiles() {
   document.getElementById('filesTable').innerHTML = table(data.files, ['filename','source','row_count','column_count','modified_at'], r => {
     const key = fileKey(r);
     return `<div class="file-actions">
-      <label class="checkbox-line"><input type="checkbox" data-shared-file-key="${escapeHtml(key)}" ${state.selectedShared.has(key) ? 'checked' : ''}/> Shared / Both</label>
-      <label class="checkbox-line"><input type="checkbox" data-opcua-file-key="${escapeHtml(key)}" ${state.selectedOpcua.has(key) ? 'checked' : ''}/> OPC UA Plan</label>
-      <label class="checkbox-line"><input type="checkbox" data-mqtt-file-key="${escapeHtml(key)}" ${state.selectedMqtt.has(key) ? 'checked' : ''}/> MQTT Plan</label>
-      <button onclick="previewCsv('${encodeURIComponent(r.filename)}','${r.source}')">Preview</button>
-      <button onclick="loadCsvIntoReplay('${encodeURIComponent(r.filename)}','${r.source}')">Load Manual</button>
-      <button onclick="deleteCsv('${encodeURIComponent(r.filename)}','${r.source}')">Delete</button>
+      <label class="checkbox-line"><input type="checkbox" data-shared-file="${escapeHtml(key)}" ${state.selectedShared.has(key) ? 'checked' : ''}>Shared</label>
+      <label class="checkbox-line"><input type="checkbox" data-opc-file="${escapeHtml(key)}" ${state.selectedOpcua.has(key) ? 'checked' : ''}>OPC UA</label>
+      <label class="checkbox-line"><input type="checkbox" data-mqtt-file="${escapeHtml(key)}" ${state.selectedMqtt.has(key) ? 'checked' : ''}>MQTT</label>
+      <button data-load-file="${escapeHtml(key)}">Load</button>
     </div>`;
   });
-  document.querySelectorAll('[data-shared-file-key]').forEach(cb => cb.addEventListener('change', e => { e.target.checked ? state.selectedShared.add(e.target.dataset.sharedFileKey) : state.selectedShared.delete(e.target.dataset.sharedFileKey); updateAssignments(); markTagPlanDirty(); }));
-  document.querySelectorAll('[data-opcua-file-key]').forEach(cb => cb.addEventListener('change', e => { e.target.checked ? state.selectedOpcua.add(e.target.dataset.opcuaFileKey) : state.selectedOpcua.delete(e.target.dataset.opcuaFileKey); updateAssignments(); markTagPlanDirty(); }));
-  document.querySelectorAll('[data-mqtt-file-key]').forEach(cb => cb.addEventListener('change', e => { e.target.checked ? state.selectedMqtt.add(e.target.dataset.mqttFileKey) : state.selectedMqtt.delete(e.target.dataset.mqttFileKey); updateAssignments(); markTagPlanDirty(); }));
+  document.querySelectorAll('[data-shared-file]').forEach(cb => cb.addEventListener('change', e => { const k=e.target.dataset.sharedFile; e.target.checked?state.selectedShared.add(k):state.selectedShared.delete(k); markTagPlanDirty(); updateAssignments(); }));
+  document.querySelectorAll('[data-opc-file]').forEach(cb => cb.addEventListener('change', e => { const k=e.target.dataset.opcFile; e.target.checked?state.selectedOpcua.add(k):state.selectedOpcua.delete(k); markTagPlanDirty(); updateAssignments(); }));
+  document.querySelectorAll('[data-mqtt-file]').forEach(cb => cb.addEventListener('change', e => { const k=e.target.dataset.mqttFile; e.target.checked?state.selectedMqtt.add(k):state.selectedMqtt.delete(k); markTagPlanDirty(); updateAssignments(); }));
+  document.querySelectorAll('[data-load-file]').forEach(btn => btn.addEventListener('click', async e => { const [source,...rest]=e.target.dataset.loadFile.split(':'); await loadCsvIntoReplay(rest.join(':'), source); }));
   updateAssignments();
 }
-window.previewCsv = async function(filenameEnc, source) {
-  const filename = decodeURIComponent(filenameEnc);
-  const data = await api(`/api/csv/files/${encodeURIComponent(filename)}/metadata?source=${source}`);
-  document.getElementById('filePreviewMeta').textContent = `${filename} | ${source} | ${data.row_count} rows | ${data.column_count} columns`;
-  document.getElementById('filePreview').innerHTML = table(data.preview);
-};
-window.loadCsvIntoReplay = async function(filenameEnc, source) {
-  const filename = decodeURIComponent(filenameEnc);
-  const data = await api(`/api/csv/files/${encodeURIComponent(filename)}/load?source=${source}`, {method:'POST'});
-  state.selectedCsvFile = {filename, source}; state.selectedCsvMetadata = data;
-  document.getElementById('replayCsvName').textContent = filename;
-  document.getElementById('replayCsvSource').textContent = source;
-  document.getElementById('replayRows').textContent = data.row_count;
-  document.getElementById('replayCols').textContent = data.column_count;
-  renderMappingTable(data.default_tag_mappings);
-  switchTab('replay'); showMessage(`Loaded ${filename} into manual replay mapping.`, 'success');
-};
-window.deleteCsv = async function(filenameEnc, source) {
-  const filename = decodeURIComponent(filenameEnc);
-  if (source === 'sample') return showMessage('Sample files cannot be deleted.', 'error');
-  await api(`/api/csv/files/${encodeURIComponent(filename)}?source=${source}`, {method:'DELETE'});
-  showMessage(`Deleted ${filename}`, 'success'); await refreshFiles();
-};
-async function uploadCsv() {
-  const input = document.getElementById('uploadInput');
-  if (!input.files.length) throw new Error('Choose one or more CSV/XLSX files first.');
-  for (const file of input.files) { const form = new FormData(); form.append('file', file); await api('/api/csv/upload', {method:'POST', body:form}); }
-  showMessage(`Uploaded ${input.files.length} file(s).`, 'success'); input.value = ''; await refreshFiles();
-}
 
+async function uploadCsv() {
+  const file = document.getElementById('uploadInput').files[0];
+  if (!file) throw new Error('Choose a CSV/XLSX file first.');
+  const form = new FormData(); form.append('file', file);
+  const data = await api('/api/csv/upload', {method:'POST', body:form});
+  showMessage(`Uploaded ${data.filename}`, 'success'); await refreshFiles();
+}
+async function loadCsvIntoReplay(filename, source = 'uploaded') {
+  state.selectedCsvFile = {filename, source};
+  state.selectedCsvMetadata = await api(`/api/csv/files/${encodeURIComponent(filename)}/metadata?source=${source}`);
+  document.getElementById('selectedFileLabel').textContent = `${filename} (${source})`;
+  renderMappingTable(state.selectedCsvMetadata.default_tag_mappings || []);
+  showMessage(`Loaded ${filename} into Replay`, 'success');
+}
 function renderMappingTable(mappings) {
-  const rows = mappings || [];
-  if (!rows.length) { document.getElementById('mappingTable').innerHTML = '<div class="hint">No CSV/XLSX loaded.</div>'; return; }
-  const body = rows.map((m, i) => `<tr data-map-row="${i}">
-    <td><input type="checkbox" data-field="enabled" ${m.enabled ? 'checked' : ''}></td><td class="mono">${escapeHtml(m.csv_column)}</td>
-    <td><input data-field="tag_name" value="${escapeHtml(m.tag_name)}"></td><td><input data-field="node_id" value="${escapeHtml(m.node_id)}"></td>
-    <td><select data-field="data_type">${['Double','Int64','Boolean','String'].map(t => `<option ${m.data_type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
-    <td><input data-field="initial_value" value="${escapeHtml(m.initial_value ?? '')}"></td><td><input type="checkbox" data-field="writable" ${m.writable ? 'checked' : ''}></td>
-  </tr>`).join('');
-  document.getElementById('mappingTable').innerHTML = `<table><thead><tr><th>Enable</th><th>CSV/XLSX Column</th><th>Tag Name</th><th>Node ID / Topic Suffix</th><th>Type</th><th>Initial</th><th>Writable</th></tr></thead><tbody>${body}</tbody></table>`;
+  const box = document.getElementById('mappingTable');
+  if (!mappings.length) { box.innerHTML = '<div class="hint">No columns available.</div>'; return; }
+  box.innerHTML = `<table><thead><tr><th>On</th><th>CSV</th><th>Tag</th><th>Node ID</th><th>Type</th><th>Writable</th></tr></thead><tbody>${mappings.map((m,i) => `<tr data-map-row="${i}">
+    <td><input type="checkbox" data-field="enabled" ${m.enabled !== false ? 'checked' : ''}></td>
+    <td>${escapeHtml(m.csv_column)}</td><td><input data-field="tag_name" value="${escapeHtml(m.tag_name)}"></td><td><input data-field="node_id" value="${escapeHtml(m.node_id)}"></td>
+    <td><select data-field="data_type">${['Double','Int64','Boolean','String'].map(t => `<option ${m.data_type===t?'selected':''}>${t}</option>`).join('')}</select></td>
+    <td><input type="checkbox" data-field="writable" ${m.writable?'checked':''}></td></tr>`).join('')}</tbody></table>`;
 }
 function collectMappings() {
-  const mappings = []; const defaults = state.selectedCsvMetadata?.default_tag_mappings || [];
-  document.querySelectorAll('[data-map-row]').forEach(row => {
-    const i = Number(row.dataset.mapRow); const base = defaults[i]; const get = f => row.querySelector(`[data-field="${f}"]`);
-    mappings.push({enabled:get('enabled').checked, csv_column:base.csv_column, tag_name:get('tag_name').value, node_id:get('node_id').value, data_type:get('data_type').value, initial_value:get('initial_value').value || null, writable:get('writable').checked});
-  });
-  return mappings;
-}
-function commonReplayFields() {
-  const maxRows = document.getElementById('maxRows').value;
-  return {
-    protocol: document.getElementById('protocolMode').value,
-    frequency_hz: Number(document.getElementById('frequencyHz').value), loop_mode: document.getElementById('loopMode').value,
-    timestamp_mode: document.getElementById('timestampMode').value, start_row: Number(document.getElementById('startRow').value), max_rows: maxRows ? Number(maxRows) : null,
-    namespace_uri: document.getElementById('namespaceUri').value, root_folder: document.getElementById('rootFolder').value, node_id_prefix: document.getElementById('nodePrefix').value,
-    mqtt_host: document.getElementById('mqttHost').value, mqtt_port: Number(document.getElementById('mqttPort').value), mqtt_topic_prefix: document.getElementById('mqttTopicPrefix').value,
-    mqtt_device_id: document.getElementById('mqttDeviceId').value || 'FlowMeter01', mqtt_client_id: document.getElementById('mqttClientId').value, mqtt_username: document.getElementById('mqttUsername').value || null, mqtt_password: document.getElementById('mqttPassword').value || null,
-    mqtt_qos: Number(document.getElementById('mqttQos').value), mqtt_retain: document.getElementById('mqttRetain').checked,
-    publish_individual_tags: document.getElementById('publishIndividualTags').checked, publish_aggregate: document.getElementById('publishAggregate').checked
-  };
+  const defaults = state.selectedCsvMetadata?.default_tag_mappings || [];
+  return [...document.querySelectorAll('[data-map-row]')].map(row => { const i=Number(row.dataset.mapRow); const d=defaults[i]; const get=f=>row.querySelector(`[data-field="${f}"]`); return {enabled:get('enabled').checked,csv_column:d.csv_column,tag_name:get('tag_name').value,node_id:get('node_id').value,data_type:get('data_type').value,initial_value:null,writable:get('writable').checked}; });
 }
 function collectReplayConfig() {
-  return {...commonReplayFields(), csv_file: state.selectedCsvFile.filename, csv_source: state.selectedCsvFile.source, tags: collectMappings()};
+  if (!state.selectedCsvFile) throw new Error('Load a CSV first.');
+  return {protocol:document.getElementById('protocolMode').value,csv_file:state.selectedCsvFile.filename,csv_source:state.selectedCsvFile.source,frequency_hz:Number(document.getElementById('frequencyHz').value),loop_mode:document.getElementById('loopMode').value,timestamp_mode:document.getElementById('timestampMode').value,start_row:Number(document.getElementById('startRow').value),namespace_uri:document.getElementById('namespaceUri').value,root_folder:document.getElementById('rootFolder').value,node_id_prefix:document.getElementById('nodePrefix').value,mqtt_host:document.getElementById('mqttHost').value,mqtt_port:Number(document.getElementById('mqttPort').value),mqtt_topic_prefix:document.getElementById('mqttTopicPrefix').value,mqtt_device_id:document.getElementById('mqttDeviceId').value,mqtt_client_id:document.getElementById('mqttClientId').value,mqtt_username:document.getElementById('mqttUsername').value||null,mqtt_password:document.getElementById('mqttPassword').value||null,mqtt_qos:Number(document.getElementById('mqttQos').value),mqtt_retain:document.getElementById('mqttRetain').checked,publish_individual_tags:document.getElementById('mqttIndividual').checked,publish_aggregate:document.getElementById('mqttAggregate').checked,tags:collectMappings()};
 }
-async function applyReplayConfig() {
-  if (!state.selectedCsvFile) {
-    const hasProtocolPlan = state.selectedShared.size || state.selectedOpcua.size || state.selectedMqtt.size;
-    if (hasProtocolPlan) {
-      showMessage('Manual config is only for a single file loaded with Load Manual. Your protocol plan is ready; click Start to run it.', 'info');
-      return;
-    }
-    throw new Error('Manual config needs a CSV/XLSX loaded with Load Manual. For OPC UA Plan / MQTT Plan, select files, click Apply Selected Protocol Plans, then click Start.');
-  }
-  const config = collectReplayConfig();
-  const data = await api('/api/replay/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(config)});
-  state.replayConfig = config; state.replayConfiguredMode = 'manual'; showMessage(`Manual replay configured with ${data.tag_count} tags. Click Start to run.`, 'success'); await refreshStatus();
-}
+async function applyReplayConfig() { const cfg=collectReplayConfig(); const data=await api('/api/replay/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)}); state.replayConfig=cfg; state.replayConfiguredMode='single'; showMessage(`${cfg.protocol.toUpperCase()} configured: ${data.tag_count} tags.`, 'success'); await refreshStatus(); }
 async function applyMultiReplayConfig(showSuccess = true) {
-  if (!state.tagPlanBuilt || state.tagPlanDirty) {
-    await buildTagPlanPreview(false);
-  }
-  const cfg = {...commonReplayFields(), files:selectedFilesFrom(state.selectedShared), opcua_files:selectedFilesFrom(state.selectedOpcua), mqtt_files:selectedFilesFrom(state.selectedMqtt), tag_selections: collectTagSelections()};
-  if (cfg.protocol === 'both') {
-    if (!cfg.files.length && (!cfg.opcua_files.length || !cfg.mqtt_files.length)) throw new Error('BOTH mode needs either Shared / Both files, or at least one OPC UA Plan file and one MQTT Plan file.');
-    if (!state.tagPlan.opcua.some(t => t.enabled)) throw new Error('Select at least one OPC UA tag in the tag preview.');
-    if (!state.tagPlan.mqtt.some(t => t.enabled)) throw new Error('Select at least one MQTT tag in the tag preview.');
-  } else if (!cfg.files.length) {
-    const protocolSet = cfg.protocol === 'opcua' ? cfg.opcua_files : cfg.mqtt_files;
-    if (!protocolSet.length) throw new Error(`Select Shared files or ${cfg.protocol.toUpperCase()} files.`);
-    cfg.files = protocolSet;
-    if (!state.tagPlan[cfg.protocol].some(t => t.enabled)) throw new Error(`Select at least one ${cfg.protocol.toUpperCase()} tag in the tag preview.`);
-  }
+  if (!state.tagPlanBuilt || state.tagPlanDirty) await buildTagPlanPreview(false);
+  const mode = document.getElementById('protocolMode').value;
+  const files = activeProtocolFiles();
+  const cfg = {
+    protocol: mode,
+    files: selectedFilesFrom(state.selectedShared),
+    opcua_files: selectedFilesFrom(state.selectedOpcua),
+    mqtt_files: selectedFilesFrom(state.selectedMqtt),
+    frequency_hz: Number(document.getElementById('frequencyHz').value),
+    loop_mode: document.getElementById('loopMode').value,
+    timestamp_mode: document.getElementById('timestampMode').value,
+    start_row: Number(document.getElementById('startRow').value),
+    namespace_uri: document.getElementById('namespaceUri').value,
+    root_folder: document.getElementById('rootFolder').value,
+    node_id_prefix: document.getElementById('nodePrefix').value,
+    mqtt_host: document.getElementById('mqttHost').value,
+    mqtt_port: Number(document.getElementById('mqttPort').value),
+    mqtt_topic_prefix: document.getElementById('mqttTopicPrefix').value,
+    mqtt_device_id: document.getElementById('mqttDeviceId').value,
+    mqtt_client_id: document.getElementById('mqttClientId').value,
+    mqtt_username: document.getElementById('mqttUsername').value || null,
+    mqtt_password: document.getElementById('mqttPassword').value || null,
+    mqtt_qos: Number(document.getElementById('mqttQos').value),
+    mqtt_retain: document.getElementById('mqttRetain').checked,
+    publish_individual_tags: document.getElementById('mqttIndividual').checked,
+    publish_aggregate: document.getElementById('mqttAggregate').checked,
+    tag_selections: collectTagSelections(),
+  };
+  if (mode === 'both' && (!files.opcua.length || !files.mqtt.length)) throw new Error('BOTH mode needs at least one file in the OPC UA plan and one in the MQTT plan. Shared files count for both.');
   const data = await api('/api/replay/configure-files', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)});
   state.replayConfig = {...cfg, configure_type: 'protocol_plans'};
   state.replayConfiguredMode = 'protocol_plans';
