@@ -90,7 +90,7 @@ class DualProtocolAdapter:
 
     async def update_values(
         self,
-        values: dict[str, tuple[Any, str]],
+        values: dict[str, Any],
         timestamp: str | None = None,
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
@@ -103,10 +103,25 @@ class DualProtocolAdapter:
             mqtt_metadata=mqtt_metadata,
         )
 
+    @staticmethod
+    def _mqtt_values(values: dict[str, Any]) -> dict[str, tuple[Any, str]]:
+        result: dict[str, tuple[Any, str]] = {}
+        for node_id, payload in values.items():
+            if isinstance(payload, dict):
+                result[node_id] = (payload.get("value"), str(payload.get("data_type") or "String"))
+                continue
+            if isinstance(payload, (list, tuple)):
+                value = payload[0] if len(payload) > 0 else None
+                data_type = str(payload[1]) if len(payload) > 1 and payload[1] else "String"
+                result[node_id] = (value, data_type)
+                continue
+            result[node_id] = (payload, "String")
+        return result
+
     async def update_channel_values(
         self,
         protocol: str,
-        values: dict[str, tuple[Any, str]],
+        values: dict[str, Any],
         timestamp: str | None = None,
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
@@ -118,7 +133,7 @@ class DualProtocolAdapter:
                 await self.opcua.update_values(values)
             if protocol in ("mqtt", "both"):
                 await self.mqtt.update_values(
-                    values,
+                    self._mqtt_values(values),
                     timestamp=timestamp,
                     current_values=current_values,
                     mqtt_metadata=mqtt_metadata,
@@ -161,7 +176,7 @@ class ProtocolChannelAdapter:
 
     async def update_values(
         self,
-        values: dict[str, tuple[Any, str]],
+        values: dict[str, Any],
         timestamp: str | None = None,
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
@@ -200,7 +215,7 @@ class ReplayJobProtocolAdapter:
 
     async def update_values(
         self,
-        values: dict[str, tuple[Any, str]],
+        values: dict[str, Any],
         timestamp: str | None = None,
         current_values: dict[str, CurrentValue] | None = None,
         mqtt_metadata: dict[str, dict[str, Any]] | None = None,
