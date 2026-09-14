@@ -5,10 +5,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.models import ReplayConfig
-from app.opcua_server import OpcUaTagServer, Server, ua
+from app.opcua_server import Server, ua
+from app.opcua_support import initial_value, normalize_server_options, server_options_match, variant_type
 
 from ..models import SignalDefinition, SimulationFrame, TargetBinding, TargetRuntimeStatus
 from .common import safe_name, tag_mapping
+from .opcua_server import UnifiedOpcUaServer as OpcUaTagServer
 
 
 @dataclass
@@ -21,6 +23,8 @@ class OpcUaHandle:
     node_map: dict[str, str]
     shared: bool
     port: int
+    folder_name: str
+    writable_count: int
 
 
 @dataclass
@@ -30,6 +34,8 @@ class _SharedGroup:
     target_id: str
     node_map: dict[str, str]
     variable_keys: set[str]
+    folder_name: str
+    writable_count: int
     folder: Any = None
 
 
@@ -43,6 +49,7 @@ class _SharedOpcUaHost:
     advertised_host: str
     namespace_uri: str
     root_folder_name: str
+    server_options: dict[str, Any]
     namespace_index: int | None = None
     root_folder: Any = None
     groups: dict[str, _SharedGroup] = field(default_factory=dict)
@@ -139,13 +146,16 @@ class InterfaceHostManager:
                             "member_key": member_key,
                             "simulation_id": group.simulation_id,
                             "target_id": group.target_id,
+                            "folder": group.folder_name,
                             "tag_count": len(group.node_map),
+                            "writable_count": group.writable_count,
                         }
                         for member_key, group in host.groups.items()
                     ],
                     "simulation_count": len({group.simulation_id for group in host.groups.values()}),
                     "target_count": len(host.groups),
                     "tag_count": sum(len(group.node_map) for group in host.groups.values()),
+                    "writable_count": sum(group.writable_count for group in host.groups.values()),
                 }
                 for key, host in self._shared_opcua.items()
             },
@@ -154,7 +164,9 @@ class InterfaceHostManager:
                     **handle.server.get_status(),
                     "simulation_id": handle.simulation_id,
                     "target_id": handle.target_id,
+                    "folder": handle.folder_name,
                     "tag_count": len(handle.node_map),
+                    "writable_count": handle.writable_count,
                     "port": handle.port,
                 }
                 for member_key, handle in self._dedicated_opcua.items()
@@ -173,8 +185,9 @@ class InterfaceHostManager:
         port = int(config.get("port", 4840))
         path = str(config.get("path", "simulator")).strip("/") or "simulator"
         advertised_host = str(config.get("advertised_host", "localhost")).strip() or "localhost"
-        namespace_uri = str(config.get("namespace_uri", "http://local/unified-simulator"))
+        namespace_uri = str(config.get("namespace_uri", "http://local/unified-simulator")).strip()
         root_folder = str(config.get("root_folder", "Simulations")).strip() or "Simulations"
+        server_options = normalize_server_options(config)
         key = _listener_key(bind_host, port)
         member_key = _member_key(simulation_id, binding.target_id)
 
@@ -196,6 +209,7 @@ class InterfaceHostManager:
                     server=OpcUaTagServer(
                         endpoint=f"opc.tcp://{bind_host}:{port}/{path}",
                         advertised_endpoint=f"opc.tcp://{advertised_host}:{port}/{path}",
+                        server_options=server_options,
                     ),
                     bind_host=bind_host,
                     port=port,
@@ -203,16 +217,18 @@ class InterfaceHostManager:
                     advertised_host=advertised_host,
                     namespace_uri=namespace_uri,
                     root_folder_name=root_folder,
+                    server_options=server_options,
                 )
                 self._shared_opcua[key] = host
 
-        _validate_shared_host(host, path, advertised_host, namespace_uri, root_folder)
+        _validate_shared_host(host, path, advertised_host, namespace_uri, root_folder, server_options)
 
         try:
             async with host.lock:
                 if not host.server.running:
                     await host.server.start()
-                node_map = _shared_node_map(simulation_id, binding.target_id, schema)
+                node_map = _shared_node_map(simulation_id, binding.target_id, schema, config)
+                folder_name = _group_folder_name(simulation_id, simulation_name, binding.target_id, config)
                 await _add_shared_group(
                     host,
                     member_key,
@@ -221,6 +237,7 @@ class InterfaceHostManager:
                     simulation_name,
                     schema,
                     node_map,
+                    folder_name,
                 )
         except Exception:
             async with self._manager_lock:
@@ -230,7 +247,19 @@ class InterfaceHostManager:
                 await host.server.stop()
             raise
 
-        return OpcUaHandle(key, member_key, binding.target_id, simulation_id, host.server, node_map, True, port)
+        writable_count = sum(1 for signal in schema if signal.writable)
+        return OpcUaHandle(
+            key,
+            member_key,
+            binding.target_id,
+            simulation_id,
+            host.server,
+            node_map,
+            True,
+            port,
+            folder_name,
+            writable_count,
+        )
 
     async def _acquire_dedicated(
         self,
@@ -246,14 +275,30 @@ class InterfaceHostManager:
         port = int(config["port"])
         path = str(config.get("path", safe_name(simulation_id))).strip("/") or safe_name(simulation_id)
         advertised_host = str(config.get("advertised_host", "localhost")).strip() or "localhost"
+        namespace_uri = str(config.get("namespace_uri", f"http://local/unified-simulator/{simulation_id}")).strip()
+        root_folder = str(config.get("root_folder", safe_name(simulation_name))).strip() or safe_name(simulation_name)
+        server_options = normalize_server_options(config)
         member_key = _member_key(simulation_id, binding.target_id)
         key = _listener_key(bind_host, port)
         server = OpcUaTagServer(
             endpoint=f"opc.tcp://{bind_host}:{port}/{path}",
             advertised_endpoint=f"opc.tcp://{advertised_host}:{port}/{path}",
+            server_options=server_options,
         )
         node_map = {signal.name: signal.node_id for signal in schema}
-        handle = OpcUaHandle(key, member_key, binding.target_id, simulation_id, server, node_map, False, port)
+        writable_count = sum(1 for signal in schema if signal.writable)
+        handle = OpcUaHandle(
+            key,
+            member_key,
+            binding.target_id,
+            simulation_id,
+            server,
+            node_map,
+            False,
+            port,
+            root_folder,
+            writable_count,
+        )
 
         async with self._manager_lock:
             if member_key in self._dedicated_opcua:
@@ -266,14 +311,7 @@ class InterfaceHostManager:
 
         try:
             await server.start()
-            await server.configure_tags(
-                _opcua_config(
-                    schema,
-                    node_map,
-                    str(config.get("namespace_uri", f"http://local/unified-simulator/{simulation_id}")),
-                    str(config.get("root_folder", safe_name(simulation_name))),
-                )
-            )
+            await server.configure_tags(_opcua_config(schema, node_map, namespace_uri, root_folder))
         except Exception:
             async with self._manager_lock:
                 if self._dedicated_opcua.get(member_key) is handle:
@@ -325,7 +363,9 @@ class OpcUaTarget:
                 "shared": self._handle.shared,
                 "host_key": self._handle.key,
                 "member_key": self._handle.member_key,
+                "folder": self._handle.folder_name,
                 "tag_count": len(self._handle.node_map),
+                "writable_count": self._handle.writable_count,
             }
             endpoint = self._handle.server.get_endpoint()
         return TargetRuntimeStatus(
@@ -352,6 +392,7 @@ def _validate_shared_host(
     advertised_host: str,
     namespace_uri: str,
     root_folder: str,
+    server_options: dict[str, Any],
 ) -> None:
     mismatches: list[str] = []
     if host.path != path:
@@ -362,6 +403,7 @@ def _validate_shared_host(
         mismatches.append(f"namespace_uri={host.namespace_uri!r}")
     if host.root_folder_name != root_folder:
         mismatches.append(f"root_folder={host.root_folder_name!r}")
+    mismatches.extend(server_options_match(host.server_options, server_options))
     if mismatches:
         raise ValueError(
             "Shared OPC UA listener settings conflict with the existing host: " + ", ".join(mismatches)
@@ -372,12 +414,34 @@ def _shared_node_map(
     simulation_id: str,
     target_id: str,
     schema: list[SignalDefinition],
+    config: dict[str, Any],
 ) -> dict[str, str]:
-    prefix = f"{safe_name(simulation_id)}.{safe_name(target_id)}"
+    prefix = str(config.get("node_id_prefix", "")).strip()
+    if not prefix:
+        prefix = f"{safe_name(simulation_id)}.{safe_name(target_id)}"
+    else:
+        prefix = safe_name(prefix)
     return {
         signal.name: f"{prefix}.{safe_name(signal.node_id or signal.name)}"
         for signal in schema
     }
+
+
+def _group_folder_name(
+    simulation_id: str,
+    simulation_name: str,
+    target_id: str,
+    config: dict[str, Any],
+) -> str:
+    template = str(config.get("group_folder", "{simulation_id}.{target_id}")).strip()
+    values = {
+        "simulation_id": simulation_id,
+        "simulation_name": simulation_name,
+        "target_id": target_id,
+    }
+    for key, value in values.items():
+        template = template.replace("{" + key + "}", str(value))
+    return safe_name(template)
 
 
 async def _add_shared_group(
@@ -388,6 +452,7 @@ async def _add_shared_group(
     simulation_name: str,
     schema: list[SignalDefinition],
     node_map: dict[str, str],
+    folder_name: str,
 ) -> None:
     if member_key in host.groups:
         raise ValueError(f"Shared OPC UA target already exists: {member_key}")
@@ -396,11 +461,12 @@ async def _add_shared_group(
     if duplicate:
         raise ValueError(f"OPC UA NodeId collision: {sorted(duplicate)[0]}")
 
+    writable_count = sum(1 for signal in schema if signal.writable)
     if host.server.mock_mode or host.server.server is None:
         for signal in schema:
             node_id = node_map[signal.name]
             host.server.variables[node_id] = {
-                "value": _initial_value(signal.data_type, signal.initial_value),
+                "value": initial_value(signal.data_type, signal.initial_value),
                 "signal": signal,
             }
         host.groups[member_key] = _SharedGroup(
@@ -409,6 +475,8 @@ async def _add_shared_group(
             target_id,
             node_map,
             set(node_map.values()),
+            folder_name,
+            writable_count,
         )
         return
 
@@ -423,19 +491,19 @@ async def _add_shared_group(
         if root is None:
             root = await server.nodes.objects.add_folder(namespace_index, host.root_folder_name)
             host.root_folder = root
-        group_name = safe_name(f"{simulation_id}.{target_id}")
-        folder = await root.add_folder(namespace_index, group_name)
+        folder = await root.add_folder(namespace_index, folder_name)
         created: dict[str, Any] = {}
         try:
             for signal in schema:
                 logical_node_id = node_map[signal.name]
-                value = _initial_value(signal.data_type, signal.initial_value)
+                value = initial_value(signal.data_type, signal.initial_value)
                 browse_name = safe_name(signal.name)
                 if ua is not None:
                     variable = await folder.add_variable(
                         ua.NodeId(logical_node_id, namespace_index),
                         browse_name,
                         value,
+                        varianttype=variant_type(signal.data_type),
                     )
                 else:  # pragma: no cover - real server implies ua is available
                     variable = await folder.add_variable(namespace_index, browse_name, value)
@@ -458,6 +526,8 @@ async def _add_shared_group(
         target_id,
         node_map,
         set(node_map.values()),
+        folder_name,
+        writable_count,
         folder,
     )
 
@@ -477,18 +547,6 @@ async def _remove_shared_group(host: _SharedOpcUaHost, member_key: str) -> None:
         await group.folder.delete(recursive=True)
 
     await host.server._run_in_server_loop(remove_impl())
-
-
-def _initial_value(data_type: str, value: Any) -> Any:
-    if value is not None:
-        return value
-    if data_type == "Double":
-        return 0.0
-    if data_type == "Int64":
-        return 0
-    if data_type == "Boolean":
-        return False
-    return ""
 
 
 def _opcua_config(
