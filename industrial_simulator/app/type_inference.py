@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.opcua_types import coerce_value as coerce_opcua_value
+
 LABEL_COLUMNS = {"timestamp", "scenario", "operating_state", "phase", "product", "product_grade", "batch_id", "heat_id"}
 BOOLEAN_SUFFIXES = ("_active", "_alarm", "_fault", "_enabled")
 INT_RE = re.compile(r"^[+-]?\d+$")
@@ -37,18 +39,13 @@ def infer_types(rows: list[dict[str, Any]], columns: list[str], sample_size: int
 
 
 def convert_value(value: Any, data_type: str) -> Any:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if text == "":
-        return None
-    if data_type == "Double":
-        return float(text)
-    if data_type == "Int64":
-        return int(float(text))
-    if data_type == "Boolean":
-        return text.lower() in {"true", "1", "yes", "y", "on"}
-    return text
+    """Compatibility facade for older replay/mapping callers.
+
+    Type inference owns only inference. Actual datatype coercion is canonicalized in
+    ``app.opcua_types`` so replay, unified mappings and OPC UA publication cannot
+    diverge in integer widths, arrays, dates, nulls or Boolean semantics.
+    """
+    return coerce_opcua_value(data_type, value)
 
 
 def sanitize_tag_name(value: str) -> str:
