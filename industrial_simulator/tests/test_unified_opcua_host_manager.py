@@ -42,10 +42,33 @@ class _FakeOpcUaServer:
         for tag in config.tags:
             self.variables[tag.node_id] = {"value": tag.initial_value, "tag": tag}
 
+    async def configure_signals(
+        self,
+        namespace_uri,
+        root_folder,
+        schema,
+        node_map,
+        data_types,
+        writable_signals,
+    ) -> None:
+        self.configured = {
+            "namespace_uri": namespace_uri,
+            "root_folder": root_folder,
+            "data_types": dict(data_types),
+            "writable_signals": set(writable_signals),
+        }
+        for signal in schema:
+            self.variables[node_map[signal.name]] = {
+                "value": signal.initial_value,
+                "data_type": data_types[signal.name],
+                "writable": signal.name in writable_signals,
+            }
+
     async def update_values(self, values) -> None:
-        for node_id, (value, _data_type) in values.items():
+        for node_id, (value, data_type) in values.items():
             if node_id in self.variables:
                 self.variables[node_id]["value"] = value
+                self.variables[node_id]["data_type"] = data_type
 
     def get_status(self) -> dict:
         return {
@@ -223,6 +246,38 @@ def test_shared_listener_uses_custom_prefix_and_group_folder(monkeypatch) -> Non
         assert handle.node_map["pressure"] == "Plant1.Line2.pressure"
         assert handle.folder_name == "Mixer_A-opcua"
         assert handle.writable_count == 1
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_target_signal_type_and_writable_overrides_are_independent(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        binding = _dedicated_binding()
+        binding.config["data_type_overrides"] = "pressure=Float\nrunning=UInt16"
+        binding.config["writable_signals"] = "running"
+        handle = await manager.acquire_opcua("sim-a", "Simulation A", binding, SCHEMA)
+        assert handle.data_types == {"pressure": "Float", "running": "UInt16"}
+        assert handle.writable_count == 1
+        assert handle.server.configured["writable_signals"] == {"running"}
+        assert handle.server.variables["pressure"]["data_type"] == "Float"
+        assert handle.server.variables["running"]["writable"] is True
+
+        await manager.publish_opcua(
+            handle,
+            SimulationFrame(
+                simulation_id="sim-a",
+                values={
+                    "pressure": SignalValue(value=7.25, data_type="Double"),
+                    "running": SignalValue(value=1, data_type="Int64"),
+                },
+            ),
+        )
+        assert handle.server.variables["pressure"]["data_type"] == "Float"
+        assert handle.server.variables["running"]["data_type"] == "UInt16"
         await manager.shutdown()
 
     asyncio.run(exercise())
