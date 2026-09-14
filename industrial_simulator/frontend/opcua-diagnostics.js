@@ -1,6 +1,4 @@
 (() => {
-  const POLL_MS = 2500;
-
   function esc(value) {
     return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[ch]));
   }
@@ -79,43 +77,51 @@
     return `<table><thead><tr><th>Time</th><th>Operation</th><th>Nodes</th><th>Failed</th><th>Node IDs</th></tr></thead><tbody>${body}</tbody></table>`;
   }
 
-  async function refreshOpcDiagnostics() {
+  function renderStatus(data) {
     ensureUi();
+    const opc = data?.protocol?.opcua || {};
+    const diag = opc.diagnostics || {};
+    setText('opcClientCount', diag.connected_clients ?? 0);
+    setText('opcReadCount', diag.read_requests ?? 0);
+    setText('opcWriteCount', diag.write_requests ?? 0);
+    setText('opcDiagAvailability', opc.diagnostics_available === false ? 'unavailable' : (opc.running ? 'live' : 'stopped'));
+    setText('opcDiagClients', diag.connected_clients ?? 0);
+    setText('opcDiagSessions', diag.session_count ?? 0);
+    setText('opcDiagReads', diag.read_requests ?? 0);
+    setText('opcDiagReadNodes', diag.read_nodes ?? 0);
+    setText('opcDiagWrites', diag.write_requests ?? 0);
+    setText('opcDiagWriteNodes', diag.write_nodes ?? 0);
+    setText('opcDiagFailedWrites', diag.failed_writes ?? 0);
+    const last = [diag.last_read_at, diag.last_write_at].filter(Boolean).sort().pop() || '-';
+    setText('opcDiagLastActivity', last);
+    const sessions = document.getElementById('opcDiagSessionTable');
+    const activity = document.getElementById('opcDiagActivityTable');
+    if (sessions) sessions.innerHTML = sessionTable(diag.sessions || []);
+    if (activity) activity.innerHTML = activityTable(diag.recent_activity || []);
+  }
+
+  function renderRawStatus() {
+    const raw = document.getElementById('rawStatus');
+    if (!raw) return;
     try {
-      const response = await fetch('/api/status', {cache: 'no-store'});
-      if (!response.ok) return;
-      const data = await response.json();
-      const opc = data?.protocol?.opcua || {};
-      const diag = opc.diagnostics || {};
-      setText('opcClientCount', diag.connected_clients ?? 0);
-      setText('opcReadCount', diag.read_requests ?? 0);
-      setText('opcWriteCount', diag.write_requests ?? 0);
-      setText('opcDiagAvailability', opc.diagnostics_available === false ? 'unavailable' : (opc.running ? 'live' : 'stopped'));
-      setText('opcDiagClients', diag.connected_clients ?? 0);
-      setText('opcDiagSessions', diag.session_count ?? 0);
-      setText('opcDiagReads', diag.read_requests ?? 0);
-      setText('opcDiagReadNodes', diag.read_nodes ?? 0);
-      setText('opcDiagWrites', diag.write_requests ?? 0);
-      setText('opcDiagWriteNodes', diag.write_nodes ?? 0);
-      setText('opcDiagFailedWrites', diag.failed_writes ?? 0);
-      const last = [diag.last_read_at, diag.last_write_at].filter(Boolean).sort().pop() || '-';
-      setText('opcDiagLastActivity', last);
-      const sessions = document.getElementById('opcDiagSessionTable');
-      const activity = document.getElementById('opcDiagActivityTable');
-      if (sessions) sessions.innerHTML = sessionTable(diag.sessions || []);
-      if (activity) activity.innerHTML = activityTable(diag.recent_activity || []);
+      renderStatus(JSON.parse(raw.textContent || '{}'));
     } catch (_) {
-      // Main app owns user-facing connectivity errors; diagnostics remain unobtrusive.
+      // Main status renderer owns connectivity/parse errors.
     }
   }
 
+  function start() {
+    ensureUi();
+    renderRawStatus();
+    const raw = document.getElementById('rawStatus');
+    if (!raw) return;
+    const observer = new MutationObserver(renderRawStatus);
+    observer.observe(raw, {childList: true, characterData: true, subtree: true});
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      refreshOpcDiagnostics();
-      setInterval(refreshOpcDiagnostics, POLL_MS);
-    });
+    document.addEventListener('DOMContentLoaded', start);
   } else {
-    refreshOpcDiagnostics();
-    setInterval(refreshOpcDiagnostics, POLL_MS);
+    start();
   }
 })();
