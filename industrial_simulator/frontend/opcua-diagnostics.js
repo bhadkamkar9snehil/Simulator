@@ -8,23 +8,42 @@
     if (el) el.textContent = value ?? '-';
   }
 
-  function sessionTable(rows) {
-    if (!rows?.length) return '<div class="hint">No connected sessions.</div>';
-    const body = rows.map(row => `<tr>
-      <td>${esc(row.name)}</td><td class="mono">${esc(row.session_id)}</td><td>${esc(row.state)}</td>
-      <td>${esc(row.user)}</td><td>${esc(row.subscriptions ?? 0)}</td>
-      <td>${row.last_activity_age_seconds == null ? '-' : esc(row.last_activity_age_seconds + ' s')}</td>
-    </tr>`).join('');
-    return `<table><thead><tr><th>Name</th><th>Session</th><th>State</th><th>User</th><th>Subscriptions</th><th>Activity age</th></tr></thead><tbody>${body}</tbody></table>`;
+  function renderRows(tableId, rowsId, emptyId, rows, rowHtml) {
+    const table = document.getElementById(tableId);
+    const body = document.getElementById(rowsId);
+    const empty = document.getElementById(emptyId);
+    if (!table || !body || !empty) return;
+    const hasRows = Array.isArray(rows) && rows.length > 0;
+    table.classList.toggle('hidden', !hasRows);
+    empty.classList.toggle('hidden', hasRows);
+    body.innerHTML = hasRows ? rows.map(rowHtml).join('') : '';
   }
 
-  function activityTable(rows) {
-    if (!rows?.length) return '<div class="hint">No read/write activity yet.</div>';
-    const body = rows.slice(0, 30).map(row => {
-      const nodes = Array.isArray(row.nodes) ? row.nodes.map(node => typeof node === 'string' ? node : node.node_id).filter(Boolean).join(', ') : '';
-      return `<tr><td>${esc(row.at)}</td><td>${esc(String(row.kind || '').toUpperCase())}</td><td>${esc(row.node_count ?? 0)}</td><td>${esc(row.failed ?? 0)}</td><td class="mono">${esc(nodes)}</td></tr>`;
-    }).join('');
-    return `<table><thead><tr><th>Time</th><th>Operation</th><th>Nodes</th><th>Failed</th><th>Node IDs</th></tr></thead><tbody>${body}</tbody></table>`;
+  function renderSessions(rows) {
+    renderRows('opcDiagSessionTable', 'opcDiagSessionRows', 'opcDiagSessionEmpty', rows, row => `<tr>
+      <td>${esc(row.name)}</td>
+      <td class="mono">${esc(row.session_id)}</td>
+      <td>${esc(row.state)}</td>
+      <td>${esc(row.user)}</td>
+      <td>${esc(row.subscriptions ?? 0)}</td>
+      <td>${row.last_activity_age_seconds == null ? '-' : esc(row.last_activity_age_seconds + ' s')}</td>
+    </tr>`);
+  }
+
+  function renderActivity(rows) {
+    const recent = Array.isArray(rows) ? rows.slice(0, 30) : [];
+    renderRows('opcDiagActivityTable', 'opcDiagActivityRows', 'opcDiagActivityEmpty', recent, row => {
+      const nodes = Array.isArray(row.nodes)
+        ? row.nodes.map(node => typeof node === 'string' ? node : node.node_id).filter(Boolean).join(', ')
+        : '';
+      return `<tr>
+        <td>${esc(row.at)}</td>
+        <td>${esc(String(row.kind || '').toUpperCase())}</td>
+        <td>${esc(row.node_count ?? 0)}</td>
+        <td>${esc(row.failed ?? 0)}</td>
+        <td class="mono">${esc(nodes)}</td>
+      </tr>`;
+    });
   }
 
   function renderStatus(data) {
@@ -43,10 +62,8 @@
     setText('opcDiagFailedWrites', diag.failed_writes ?? 0);
     const last = [diag.last_read_at, diag.last_write_at].filter(Boolean).sort().pop() || '-';
     setText('opcDiagLastActivity', last);
-    const sessions = document.getElementById('opcDiagSessionTable');
-    const activity = document.getElementById('opcDiagActivityTable');
-    if (sessions) sessions.innerHTML = sessionTable(diag.sessions || []);
-    if (activity) activity.innerHTML = activityTable(diag.recent_activity || []);
+    renderSessions(diag.sessions || []);
+    renderActivity(diag.recent_activity || []);
   }
 
   window.renderOpcUaDiagnostics = renderStatus;
