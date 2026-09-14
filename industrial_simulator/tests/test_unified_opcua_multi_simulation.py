@@ -85,7 +85,24 @@ def _binding() -> TargetBinding:
     )
 
 
-def _definition(simulation_id: str, start: int) -> SimulationDefinition:
+def _dedicated_binding(port: int) -> TargetBinding:
+    return TargetBinding(
+        target_id="opcua",
+        kind="opcua",
+        hosting_mode="dedicated",
+        failure_policy="stop_simulation",
+        config={
+            "bind_host": "127.0.0.1",
+            "advertised_host": "localhost",
+            "port": port,
+            "path": f"sim-{port}",
+            "namespace_uri": f"http://local/unified-simulator/{port}",
+            "root_folder": f"Simulation{port}",
+        },
+    )
+
+
+def _definition(simulation_id: str, start: int, target: TargetBinding | None = None) -> SimulationDefinition:
     return SimulationDefinition(
         simulation_id=simulation_id,
         name=simulation_id,
@@ -95,7 +112,7 @@ def _definition(simulation_id: str, start: int) -> SimulationDefinition:
         ),
         clock=ClockSpec(frequency_hz=20.0),
         loop_mode="loop_forever",
-        targets=[_binding()],
+        targets=[target or _binding()],
     )
 
 
@@ -202,5 +219,114 @@ def test_failed_concurrent_join_cannot_orphan_successful_shared_member(monkeypat
 
         await hosts.release_opcua(handle)
         assert hosts.status()["shared_opcua_hosts"] == {}
+
+    asyncio.run(run())
+
+
+def test_last_shared_member_release_waits_for_pending_join(monkeypatch) -> None:
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    monkeypatch.setattr(opcua_module, "Server", object())
+    _FakeOpcUaServer.instances.clear()
+
+    async def run() -> None:
+        hosts = opcua_module.InterfaceHostManager()
+        schema = [SignalDefinition(name="value", node_id="value", data_type="Double")]
+        first = await hosts.acquire_opcua("sim-a", "A", _binding(), schema)
+        server = first.server
+
+        entered = asyncio.Event()
+        allow_join = asyncio.Event()
+        original_add = opcua_module._add_shared_group
+
+        async def blocked_add(host, member_key, target_id, simulation_id, simulation_name, schema, node_map, data_types, writable, folder_name):
+            if simulation_id == "sim-b":
+                entered.set()
+                await allow_join.wait()
+            return await original_add(
+                host,
+                member_key,
+                target_id,
+                simulation_id,
+                simulation_name,
+                schema,
+                node_map,
+                data_types,
+                writable,
+                folder_name,
+            )
+
+        monkeypatch.setattr(opcua_module, "_add_shared_group", blocked_add)
+        joining = asyncio.create_task(hosts.acquire_opcua("sim-b", "B", _binding(), schema))
+        await entered.wait()
+        assert hosts.status()["shared_opcua_hosts"]["0.0.0.0:4840"]["pending_targets"] == 1
+
+        releasing = asyncio.create_task(hosts.release_opcua(first))
+        await asyncio.sleep(0)
+        assert server.running is True
+        assert server.stop_count == 0
+
+        allow_join.set()
+        second = await joining
+        await releasing
+        status = hosts.status()["shared_opcua_hosts"]["0.0.0.0:4840"]
+        assert status["simulation_count"] == 1
+        assert status["simulation_targets"][0]["simulation_id"] == "sim-b"
+        assert server.running is True
+        assert server.start_count == 1
+        assert server.stop_count == 0
+
+        await hosts.release_opcua(second)
+        assert server.stop_count == 1
+        assert hosts.status()["shared_opcua_hosts"] == {}
+
+    asyncio.run(run())
+
+
+def test_dedicated_simulations_do_not_share_lifecycle(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FakeOpcUaServer)
+    monkeypatch.setattr(opcua_module, "Server", object())
+    _FakeOpcUaServer.instances.clear()
+
+    async def run() -> None:
+        manager = SimulationManager(tmp_path / "runtime.json")
+        await manager.create(_definition("sim-a", 10, _dedicated_binding(4841)))
+        await manager.create(_definition("sim-b", 100, _dedicated_binding(4842)))
+        await asyncio.gather(manager.start("sim-a"), manager.start("sim-b"))
+
+        server_a = next(server for server in _FakeOpcUaServer.instances if ":4841/" in server.endpoint)
+        server_b = next(server for server in _FakeOpcUaServer.instances if ":4842/" in server.endpoint)
+        assert server_a is not server_b
+        assert server_a.running and server_b.running
+
+        await manager.pause("sim-a")
+        assert manager.status("sim-a").state == "paused"
+        assert manager.status("sim-b").state in {"running", "degraded"}
+        assert server_b.start_count == 1
+        assert server_b.stop_count == 0
+
+        before_b = manager.status("sim-b").emitted_count
+        await asyncio.sleep(0.08)
+        assert manager.status("sim-b").emitted_count > before_b
+
+        await manager.stop("sim-a")
+        assert server_a.stop_count == 1
+        assert server_b.running is True
+        assert server_b.stop_count == 0
+
+        await manager.restart("sim-a")
+        replacement_a = next(
+            server for server in reversed(_FakeOpcUaServer.instances)
+            if ":4841/" in server.endpoint and server is not server_a
+        )
+        assert replacement_a.running is True
+        assert server_b.running is True
+        assert server_b.start_count == 1
+        assert server_b.stop_count == 0
+
+        await manager.stop("sim-a")
+        await manager.stop("sim-b")
+        assert replacement_a.stop_count == 1
+        assert server_b.stop_count == 1
+        await manager.shutdown()
 
     asyncio.run(run())
