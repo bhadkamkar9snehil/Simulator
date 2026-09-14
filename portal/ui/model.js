@@ -95,8 +95,10 @@ export function targetLabel(kind) {
   return ({
     opcua: "OPC UA",
     mqtt: "MQTT",
-    http: "HTTP",
-    http_stream: "HTTP",
+    api: "REST API",
+    rest_api: "REST API",
+    http: "HTTP Stream",
+    http_stream: "HTTP Stream",
     sql: "SQL Server",
     sql_server: "SQL Server",
     odata: "OData",
@@ -220,6 +222,22 @@ export function addTarget(definition, kind, opcuaPort = 4840) {
   };
   if (kind === "opcua") Object.assign(common, defaultOpcUaTarget(opcuaPort), { target_id: targetId });
   if (kind === "mqtt") common.config = { host: "localhost", port: 1883, topic_prefix: `simulator/${definition.simulation_id}` };
+  if (kind === "api") common.config = {
+    method: "GET",
+    path: `/simulations/${definition.simulation_id}`,
+    response_mode: "record",
+    status_code: 200,
+    empty_status_code: 503,
+    delay_ms: 0,
+    fields: "",
+    envelope: "",
+    include_context: true,
+    include_system_fields: true,
+    history_size: 100,
+    required_headers: "",
+    response_headers: "Content-Type: application/json",
+    response_template: "{\n  \"temperature\": \"${values.Temperature}\",\n  \"id\": \"${path.id}\"\n}",
+  };
   if (kind === "http") common.config = {};
   if (kind === "sql_server") common.config = { server: "localhost", port: 1433, database: "Simulator", table: "dbo.tag_snapshots", auth: "windows", batch_size: 100 };
   if (kind === "odata") common.config = { entity_set: "SimulationValues", max_rows: 10000 };
