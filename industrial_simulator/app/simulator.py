@@ -22,7 +22,7 @@ class ProtocolPublisher(Protocol):
     async def configure_tags(self, config: ReplayConfig) -> None: ...
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
-    async def update_values(self, values: dict[str, tuple[Any, str]], timestamp: str | None = None, current_values: dict[str, CurrentValue] | None = None, mqtt_metadata: dict[str, dict[str, Any]] | None = None) -> None: ...
+    async def update_values(self, values: dict[str, Any], timestamp: str | None = None, current_values: dict[str, CurrentValue] | None = None, mqtt_metadata: dict[str, dict[str, Any]] | None = None) -> None: ...
     def get_endpoint(self) -> str: ...
 
 
@@ -77,7 +77,16 @@ class SimulatorEngine:
             raise ValueError("CSV has no data rows.")
         if config.start_row >= row_count:
             raise ValueError("start_row must be less than row_count.")
-        missing = [t.csv_column for t in config.tags if t.enabled and t.csv_column not in columns]
+        required_columns: list[str] = []
+        for tag in config.tags:
+            if not tag.enabled:
+                continue
+            required_columns.append(tag.csv_column)
+            if tag.quality_column:
+                required_columns.append(tag.quality_column)
+            if tag.source_timestamp_column:
+                required_columns.append(tag.source_timestamp_column)
+        missing = sorted({column for column in required_columns if column not in columns})
         if missing:
             raise ValueError(f"CSV columns not found: {', '.join(missing)}")
         self.config = config
@@ -198,7 +207,7 @@ class SimulatorEngine:
     async def emit_once(self) -> None:
         assert self.config is not None
         row = self._row_at(self.cursor)
-        values_for_mqtt: dict[str, tuple[Any, str]] = {}
+        values_for_protocols: dict[str, Any] = {}
         mqtt_metadata: dict[str, dict[str, Any]] = {}
 
         if self.config.timestamp_mode == "csv_timestamp_ignore_rate":
@@ -218,16 +227,41 @@ class SimulatorEngine:
                 value = convert_value(raw, tag.data_type)
             except Exception:
                 value = None
+
+            metadata = self._mqtt_metadata_for_row(row, tag.csv_column)
+            quality = self._configured_row_value(row, tag.quality_column)
+            if quality is None:
+                quality = metadata.get("quality")
+            if quality is None or str(quality).strip() == "":
+                quality = tag.quality
+
+            source_timestamp = self._configured_row_value(row, tag.source_timestamp_column)
+            if source_timestamp is None:
+                source_timestamp = tag.source_timestamp
+
+            metadata["quality"] = quality
+            if source_timestamp is not None and str(source_timestamp).strip() != "":
+                metadata["source_timestamp"] = source_timestamp
+
             cv = CurrentValue(tag_name=tag.tag_name, node_id=tag.node_id, value=value, data_type=tag.data_type, last_updated=timestamp)
             self.current_values[tag.node_id] = cv
-            values_for_mqtt[tag.node_id] = (value, tag.data_type)
-            mqtt_metadata[tag.node_id] = self._mqtt_metadata_for_row(row, tag.csv_column)
+            values_for_protocols[tag.node_id] = (value, tag.data_type, quality, source_timestamp)
+            mqtt_metadata[tag.node_id] = metadata
         self.updated_at = timestamp
-        await self.publisher.update_values(values_for_mqtt, timestamp=timestamp, current_values=self.current_values, mqtt_metadata=mqtt_metadata)
+        await self.publisher.update_values(values_for_protocols, timestamp=timestamp, current_values=self.current_values, mqtt_metadata=mqtt_metadata)
         self.emitted_count += 1
 
+    @staticmethod
+    def _configured_row_value(row: dict[str, Any], column: str | None) -> Any:
+        if not column:
+            return None
+        value = row.get(column)
+        if value is None or str(value).strip() == "":
+            return None
+        return value
+
     def _mqtt_metadata_for_row(self, row: dict[str, Any], csv_column: str) -> dict[str, Any]:
-        metadata: dict[str, Any] = {"tag": csv_column, "quality": "GOOD"}
+        metadata: dict[str, Any] = {"tag": csv_column}
         unit = self._row_value_case_insensitive(
             row,
             [
