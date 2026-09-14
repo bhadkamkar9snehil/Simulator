@@ -4,12 +4,18 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.models import ReplayConfig
 from app.opcua_server import Server, ua
-from app.opcua_support import initial_value, normalize_server_options, server_options_match, variant_type
+from app.opcua_support import (
+    initial_value,
+    normalize_server_options,
+    parse_type_overrides,
+    parse_writable_signals,
+    server_options_match,
+    variant_type,
+)
 
 from ..models import SignalDefinition, SimulationFrame, TargetBinding, TargetRuntimeStatus
-from .common import safe_name, tag_mapping
+from .common import safe_name
 from .opcua_server import UnifiedOpcUaServer as OpcUaTagServer
 
 
@@ -21,6 +27,7 @@ class OpcUaHandle:
     simulation_id: str
     server: OpcUaTagServer
     node_map: dict[str, str]
+    data_types: dict[str, str]
     shared: bool
     port: int
     folder_name: str
@@ -33,6 +40,7 @@ class _SharedGroup:
     simulation_name: str
     target_id: str
     node_map: dict[str, str]
+    data_types: dict[str, str]
     variable_keys: set[str]
     folder_name: str
     writable_count: int
@@ -102,7 +110,7 @@ class InterfaceHostManager:
 
     async def publish_opcua(self, handle: OpcUaHandle, frame: SimulationFrame) -> None:
         values = {
-            handle.node_map[name]: (signal.value, signal.data_type)
+            handle.node_map[name]: (signal.value, handle.data_types.get(name, signal.data_type))
             for name, signal in frame.values.items()
             if name in handle.node_map
         }
@@ -188,6 +196,7 @@ class InterfaceHostManager:
         namespace_uri = str(config.get("namespace_uri", "http://local/unified-simulator")).strip()
         root_folder = str(config.get("root_folder", "Simulations")).strip() or "Simulations"
         server_options = normalize_server_options(config)
+        data_types, writable = _signal_options(schema, config)
         key = _listener_key(bind_host, port)
         member_key = _member_key(simulation_id, binding.target_id)
 
@@ -237,6 +246,8 @@ class InterfaceHostManager:
                     simulation_name,
                     schema,
                     node_map,
+                    data_types,
+                    writable,
                     folder_name,
                 )
         except Exception:
@@ -247,7 +258,6 @@ class InterfaceHostManager:
                 await host.server.stop()
             raise
 
-        writable_count = sum(1 for signal in schema if signal.writable)
         return OpcUaHandle(
             key,
             member_key,
@@ -255,10 +265,11 @@ class InterfaceHostManager:
             simulation_id,
             host.server,
             node_map,
+            data_types,
             True,
             port,
             folder_name,
-            writable_count,
+            len(writable),
         )
 
     async def _acquire_dedicated(
@@ -278,6 +289,7 @@ class InterfaceHostManager:
         namespace_uri = str(config.get("namespace_uri", f"http://local/unified-simulator/{simulation_id}")).strip()
         root_folder = str(config.get("root_folder", safe_name(simulation_name))).strip() or safe_name(simulation_name)
         server_options = normalize_server_options(config)
+        data_types, writable = _signal_options(schema, config)
         member_key = _member_key(simulation_id, binding.target_id)
         key = _listener_key(bind_host, port)
         server = OpcUaTagServer(
@@ -286,7 +298,6 @@ class InterfaceHostManager:
             server_options=server_options,
         )
         node_map = {signal.name: signal.node_id for signal in schema}
-        writable_count = sum(1 for signal in schema if signal.writable)
         handle = OpcUaHandle(
             key,
             member_key,
@@ -294,10 +305,11 @@ class InterfaceHostManager:
             simulation_id,
             server,
             node_map,
+            data_types,
             False,
             port,
             root_folder,
-            writable_count,
+            len(writable),
         )
 
         async with self._manager_lock:
@@ -311,7 +323,14 @@ class InterfaceHostManager:
 
         try:
             await server.start()
-            await server.configure_tags(_opcua_config(schema, node_map, namespace_uri, root_folder))
+            await server.configure_signals(
+                namespace_uri,
+                root_folder,
+                schema,
+                node_map,
+                data_types,
+                writable,
+            )
         except Exception:
             async with self._manager_lock:
                 if self._dedicated_opcua.get(member_key) is handle:
@@ -366,6 +385,11 @@ class OpcUaTarget:
                 "folder": self._handle.folder_name,
                 "tag_count": len(self._handle.node_map),
                 "writable_count": self._handle.writable_count,
+                "type_overrides": {
+                    name: data_type
+                    for name, data_type in self._handle.data_types.items()
+                    if data_type not in {"Double", "Int64", "Boolean", "String"}
+                },
             }
             endpoint = self._handle.server.get_endpoint()
         return TargetRuntimeStatus(
@@ -410,6 +434,24 @@ def _validate_shared_host(
         )
 
 
+def _signal_options(
+    schema: list[SignalDefinition],
+    config: dict[str, Any],
+) -> tuple[dict[str, str], set[str]]:
+    available = {signal.name for signal in schema}
+    overrides = parse_type_overrides(config.get("data_type_overrides"), available)
+    data_types = {
+        signal.name: overrides.get(signal.name, signal.data_type)
+        for signal in schema
+    }
+    writable_value = config.get("writable_signals")
+    if writable_value is None:
+        writable = {signal.name for signal in schema if signal.writable}
+    else:
+        writable = parse_writable_signals(writable_value, available)
+    return data_types, writable
+
+
 def _shared_node_map(
     simulation_id: str,
     target_id: str,
@@ -452,6 +494,8 @@ async def _add_shared_group(
     simulation_name: str,
     schema: list[SignalDefinition],
     node_map: dict[str, str],
+    data_types: dict[str, str],
+    writable: set[str],
     folder_name: str,
 ) -> None:
     if member_key in host.groups:
@@ -461,22 +505,25 @@ async def _add_shared_group(
     if duplicate:
         raise ValueError(f"OPC UA NodeId collision: {sorted(duplicate)[0]}")
 
-    writable_count = sum(1 for signal in schema if signal.writable)
     if host.server.mock_mode or host.server.server is None:
         for signal in schema:
             node_id = node_map[signal.name]
+            data_type = data_types[signal.name]
             host.server.variables[node_id] = {
-                "value": initial_value(signal.data_type, signal.initial_value),
+                "value": initial_value(data_type, signal.initial_value),
                 "signal": signal,
+                "data_type": data_type,
+                "writable": signal.name in writable,
             }
         host.groups[member_key] = _SharedGroup(
             simulation_id,
             simulation_name,
             target_id,
             node_map,
+            data_types,
             set(node_map.values()),
             folder_name,
-            writable_count,
+            len(writable),
         )
         return
 
@@ -496,18 +543,19 @@ async def _add_shared_group(
         try:
             for signal in schema:
                 logical_node_id = node_map[signal.name]
-                value = initial_value(signal.data_type, signal.initial_value)
+                data_type = data_types[signal.name]
+                value = initial_value(data_type, signal.initial_value)
                 browse_name = safe_name(signal.name)
                 if ua is not None:
                     variable = await folder.add_variable(
                         ua.NodeId(logical_node_id, namespace_index),
                         browse_name,
                         value,
-                        varianttype=variant_type(signal.data_type),
+                        varianttype=variant_type(data_type),
                     )
                 else:  # pragma: no cover - real server implies ua is available
                     variable = await folder.add_variable(namespace_index, browse_name, value)
-                if signal.writable:
+                if signal.name in writable:
                     await variable.set_writable()
                 created[logical_node_id] = variable
         except Exception:
@@ -525,9 +573,10 @@ async def _add_shared_group(
         simulation_name,
         target_id,
         node_map,
+        data_types,
         set(node_map.values()),
         folder_name,
-        writable_count,
+        len(writable),
         folder,
     )
 
@@ -547,18 +596,3 @@ async def _remove_shared_group(host: _SharedOpcUaHost, member_key: str) -> None:
         await group.folder.delete(recursive=True)
 
     await host.server._run_in_server_loop(remove_impl())
-
-
-def _opcua_config(
-    schema: list[SignalDefinition],
-    node_map: dict[str, str],
-    namespace_uri: str,
-    root_folder: str,
-) -> ReplayConfig:
-    return ReplayConfig(
-        protocol="opcua",
-        namespace_uri=namespace_uri,
-        root_folder=root_folder,
-        node_id_prefix=root_folder,
-        tags=[tag_mapping(signal, node_map[signal.name], signal.name) for signal in schema],
-    )
