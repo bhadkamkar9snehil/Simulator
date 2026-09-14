@@ -3,215 +3,222 @@
 **Status:** active migration / alpha architecture  
 **Normative requirements:** [UNIFIED_SIMULATOR_REQUIREMENTS.md](UNIFIED_SIMULATOR_REQUIREMENTS.md)
 
-## Purpose
+This file records what is actually implemented. It must not describe temporary limitations that no longer exist.
 
-This document records what has actually been built toward the unified Simulator architecture. It is not a second requirements document. When implementation changes, update this file rather than weakening the requirements to match temporary limitations.
-
-## Current runtime shape
+## Runtime shape
 
 ```text
 SimulationManager
 ├─ SimulationInstance A
 │  ├─ SimulationSource
-│  ├─ independent clock/cursor/lifecycle
+│  ├─ independent clock / cursor / lifecycle
+│  ├─ canonical mapping
 │  └─ TargetRunner[]
-│     ├─ bounded queue → OPC UA target
-│     ├─ bounded queue → MQTT target
-│     └─ bounded queue → HTTP target
+│     ├─ bounded queue → OPC UA
+│     ├─ bounded queue → REST API
+│     ├─ bounded queue → MQTT
+│     ├─ bounded queue → HTTP Stream
+│     ├─ bounded queue → SQL Server
+│     └─ bounded queue → OData
 ├─ SimulationInstance B
 │  └─ ...
 ├─ World definitions
-└─ InterfaceHostManager
-   ├─ shared OPC UA host(s)
-   └─ dedicated OPC UA host(s)
+└─ shared/dedicated interface ownership
 ```
 
-The legacy replay engine remains available while callers are migrated. The unified runtime is additive at this stage, not a flag-day rewrite.
-
-## Implemented first-class models
-
-The new runtime provides explicit models for `SimulationDefinition`, `SourceBinding`, `TargetBinding`, `ClockSpec`, `SimulationFrame`, `SignalValue`, `SignalDefinition`, `SimulationStatus`, `TargetRuntimeStatus`, and `WorldDefinition`.
-
-A Simulation Definition has an independent source, clock, loop mode, world association, and any number of enabled target bindings. There is no `both` protocol mode in the new architecture.
+There is no protocol-combination mode in the unified runtime. Each Simulation Definition owns independent target bindings.
 
 ## Implemented sources
 
-### CSV / XLSX / registered CSV dataset
+- CSV with indexed random access;
+- XLSX through the existing reader;
+- registered datasets;
+- Parquet files and Parquet folders using row-group indexing/caching;
+- existing industrial domain generators;
+- existing SAP PP source simulator;
+- existing LIMS/ODBC source simulator;
+- inline rows for tests and lightweight API-driven scenarios.
 
-Uses existing `csv_manager` and `dataset_manager` logic. CSV replay uses an extracted random-access index so large CSVs are not loaded fully into memory. XLSX currently uses the existing workbook reader.
+All sources emit the same canonical frame model before target projection.
 
-### Existing domain generators
+## Canonical mapping
 
-`GeneratorSimulationSource` adapts the existing generator registry. Existing domain generators remain the source of process behavior; the unified runtime does not duplicate them.
+Simulation Definitions support explicit signal mappings before fan-out:
 
-### Existing source simulators
+- source → output name;
+- NodeId override;
+- data type override;
+- unit and quality override;
+- linear scale and offset;
+- metadata additions;
+- optional dropping of unmapped signals.
 
-`SourceSimulatorSimulationSource` adapts the existing SAP PP and LIMS source-simulator registry. Query results become canonical frames and can therefore be served through any new runtime target.
+The mapping runs once per canonical frame. Protocol targets do not repeat source-specific transformation logic.
 
-### Inline rows
+## OPC UA
 
-A deliberately small in-memory source exists for API-driven tests, diagnostics, and lightweight examples. It is not intended to replace file/dataset management.
+OPC UA remains the primary end-to-end product path.
 
-## Implemented targets
+Implemented behavior includes:
 
-### OPC UA
+- shared listeners for multiple concurrent simulations;
+- dedicated endpoints;
+- real configurable bind host;
+- advertised host, port and endpoint path;
+- namespace URI and root folder configuration;
+- configured client-visible string NodeIds;
+- duplicate/empty NodeId validation;
+- collision-safe simulation + target identity;
+- incremental shared-host group add/remove without restarting unrelated simulations;
+- transactional group creation/rollback;
+- shared/dedicated socket conflict detection before bind;
+- explicit failure when the OPC UA stack is unavailable rather than a production mock-success mode.
 
-The adapter reuses `OpcUaTagServer`.
+Shared-host NodeIds are intentionally scoped/prefixed to prevent collisions between simulations. Dedicated endpoints use configured NodeIds directly.
 
-Two hosting modes are represented:
+## REST API simulation
 
-- `shared`: several Simulation Instances are exposed through one OPC UA listener;
-- `dedicated`: a simulation target receives its own configured OPC UA port/path.
+REST API simulation is implemented as a first-class target on the shared Industrial FastAPI host.
 
-Temporary migration limitation: the existing OPC UA server API builds one tag tree at configuration time. Therefore changing shared-host membership currently rebuilds that host with the union of member schemas. Publishing and reconfiguration are serialized with an `asyncio.Lock`. A later OPC UA cleanup should add incremental namespace/group mutation so membership changes do not restart the shared listener.
+Each API target owns one public route under `/sim-api` and supports:
+
+- GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS;
+- arbitrary route paths and named path parameters;
+- query and request-body values available to response templates;
+- required request headers;
+- response headers;
+- configurable response delay;
+- configurable success/no-data status codes;
+- current values, canonical frame, flat record, retained history or custom JSON response modes;
+- field selection, context/system-field inclusion and response envelopes;
+- typed template references to values/context/path/query/body/frame metadata;
+- request count, last-request and history metrics.
+
+See [API_SIMULATION.md](API_SIMULATION.md).
+
+Requests do not advance a source. API, OPC UA, MQTT, SQL and OData attached to one Simulation Instance therefore observe one shared simulated timeline.
+
+## Other implemented targets
 
 ### MQTT
 
-The adapter reuses `MqttTagPublisher`. Each target has its own publisher/client configuration while multiple targets may use the same broker. MQTT-specific topic/device/envelope behavior remains in the MQTT layer.
+Reuses the existing `MqttTagPublisher`. Each target owns its own publisher/client configuration while several targets may share one broker.
 
-### HTTP
+### HTTP Stream
 
-The existing FastAPI Industrial service acts as a shared HTTP host. An HTTP target exposes the Simulation Instance under `/api/v2/simulations/{simulation_id}/targets/{target_id}` with point-in-time frame access plus NDJSON, SSE, and WebSocket streams. The runtime's last canonical frame remains available after a finite simulation completes.
+The shared Industrial FastAPI host exposes point-in-time snapshot plus NDJSON, SSE and WebSocket views under `/api/v2/simulations/{simulation_id}/targets/{target_id}`.
+
+This remains distinct from REST API simulation: HTTP Stream exposes canonical frame transport; REST API simulation models request/response contracts.
+
+### SQL Server
+
+SQL Server is a real batched target. Portal and simulations share one Industrial-owned System.Data/PowerShell execution path rather than duplicating SQL process code.
+
+### OData
+
+OData targets expose service document, `$metadata`, entity set data, `$top`, `$skip`, `$select` and simple equality `$filter` over bounded retained canonical rows.
 
 ### Memory/internal
 
-A minimal in-process target exists for tests and diagnostics. It is intentionally not a general plugin mechanism.
+A small in-process target remains for tests and diagnostics only.
 
 ## Target isolation and backpressure
 
-Each enabled target gets an independent bounded queue and worker. Target bindings configure:
+Each enabled target has an independent bounded queue and worker.
+
+Configurable behavior:
 
 - queue size;
-- overflow policy: `block`, `drop_oldest`, or `drop_newest`;
-- failure policy: `continue`, `retry`, or `stop_simulation`;
+- `block`, `drop_oldest`, `drop_newest` overflow;
+- `continue`, `retry`, `stop_simulation` failure policy;
 - retry delay.
 
-A failing target therefore does not automatically stop the Simulation Instance or block other targets. Status exposes queue depth, dropped frames, published frames, endpoint, and last error.
+One unhealthy target therefore does not inherently stop healthy siblings.
 
-## Timing and lifecycle
+## Lifecycle and timing
 
-Each Simulation Instance owns its own timing state. Supported clock modes are currently fixed rate and source timestamps with speed multiplier and maximum sleep bound.
+Implemented per-simulation controls:
 
-Supported loop modes are `once`, `loop_forever`, `hold_last`, and `ping_pong`.
+- start;
+- pause;
+- resume;
+- stop;
+- restart;
+- reset cursor;
+- seek while paused.
 
-Each instance supports start, pause, resume, and stop independently. Multiple instances execute concurrently under one `SimulationManager`.
+Clock modes:
 
-## Worlds
+- fixed rate;
+- source timestamps with speed multiplier and maximum delay.
 
-World definitions group existing Simulation Instances and can start/stop them as a coordinated set. A World does not own protocol implementation and is not required for simple simulations.
+Loop modes:
 
-World context can be attached to emitted canonical frames so downstream adapters can correlate related simulations.
+- once;
+- loop forever;
+- hold last;
+- ping-pong.
+
+Cursor changes drain target queues first and use a source-generation guard so a frame read before a seek cannot leak after resume.
 
 ## Persistence
 
-Definitions and Worlds are stored as JSON in `configs/unified_simulations.json` using an atomic temporary-file replace. Runtime tasks are not blindly resurrected on process start; persisted definitions load in a non-running state.
+Simulation Definitions and Worlds are persisted to `configs/unified_simulations.json` with atomic replacement.
 
-A persistence error is surfaced in the runtime snapshot rather than silently being treated as a valid empty configuration.
+Persisted definitions load as configured runtime objects; tasks are not blindly resurrected from stale process state.
 
-## API
+The Portal workspace separately remembers navigation/editor state and unsaved work. Backend state remains authoritative whenever the UI reconnects.
 
-The unified API is namespaced under `/api/v2` so legacy APIs remain available during migration.
+## Portal/UI
 
-Primary routes include:
+The simulation-centric workspace is served at the Portal root. The old UI remains temporarily under `/legacy` during migration.
 
-```text
-GET    /api/v2/capabilities
-GET    /api/v2/runtime
-GET    /api/v2/interfaces
-GET    /api/v2/simulations
-POST   /api/v2/simulations
-GET    /api/v2/simulations/{id}
-PUT    /api/v2/simulations/{id}
-DELETE /api/v2/simulations/{id}
-POST   /api/v2/simulations/{id}/start
-POST   /api/v2/simulations/{id}/pause
-POST   /api/v2/simulations/{id}/resume
-POST   /api/v2/simulations/{id}/stop
-GET    /api/v2/simulations/{id}/snapshot
-GET    /api/v2/simulations/{id}/targets/{target}
-GET    /api/v2/simulations/{id}/targets/{target}/ndjson
-GET    /api/v2/simulations/{id}/targets/{target}/sse
-WS     /api/v2/simulations/{id}/targets/{target}/ws
-GET    /api/v2/worlds
-POST   /api/v2/worlds
-PUT    /api/v2/worlds/{id}
-DELETE /api/v2/worlds/{id}
-POST   /api/v2/worlds/{id}/start
-POST   /api/v2/worlds/{id}/stop
-```
+Implemented workspace behavior includes:
 
-## Example: two simulations at once
+- create/edit/save/duplicate/delete simulations;
+- start/pause/resume/stop/restart;
+- reset/seek cursor controls;
+- source configuration and source preview;
+- large signal-mapping editor;
+- detailed shared/dedicated OPC UA configuration;
+- REST API target configuration;
+- MQTT, HTTP Stream, SQL Server and OData target configuration;
+- target/runtime health and current values;
+- remembered navigation, selected simulation, filters, tabs and scroll positions;
+- recovery of genuinely unsaved local work without allowing stale browser state to override backend truth.
 
-Simulation A can use a generated process source and fan out to shared OPC UA and MQTT:
+## Portal/backend cleanup completed
 
-```json
-{
-  "simulation_id": "plant-a-process",
-  "name": "Plant A Process",
-  "source": {
-    "kind": "generator",
-    "config": {
-      "domain_id": "petroleum_pipeline",
-      "scenario": "normal"
-    }
-  },
-  "clock": {"mode": "fixed_rate", "frequency_hz": 5, "speed": 1},
-  "loop_mode": "loop_forever",
-  "targets": [
-    {
-      "target_id": "plant-a-opcua",
-      "kind": "opcua",
-      "hosting_mode": "shared",
-      "config": {"port": 4840, "root_folder": "Simulations"}
-    },
-    {
-      "target_id": "plant-a-mqtt",
-      "kind": "mqtt",
-      "config": {"host": "localhost", "port": 1883, "topic_prefix": "simulator/plant-a"}
-    }
-  ]
-}
-```
+- Portal control server migrated to FastAPI;
+- API Studio retired and its code/dependencies/port contract removed;
+- obsolete Portal patcher/backups removed;
+- fake retry/cleanup/convert and status-only job control routes removed;
+- legacy async `RLock`-across-`await` misuse corrected;
+- release packaging converted to an explicit runtime allowlist;
+- SQL execution moved out of Portal ownership into the Industrial runtime.
 
-At the same time Simulation B can replay a file independently to HTTP:
+## Validation policy
 
-```json
-{
-  "simulation_id": "line-b-replay",
-  "name": "Line B Replay",
-  "source": {
-    "kind": "csv",
-    "config": {"filename": "line-b.csv", "csv_source": "uploaded"}
-  },
-  "clock": {"mode": "source_timestamp", "frequency_hz": 1, "speed": 10},
-  "loop_mode": "once",
-  "targets": [
-    {"target_id": "line-b-http", "kind": "http"}
-  ]
-}
-```
+GitHub Actions and GitHub-hosted CI are not used for this repository.
 
-Their clocks, positions, errors, queues, targets, and lifecycle are independent.
+Validation is local/manual or through a separately selected non-GitHub mechanism. Do not add `.github/workflows/*`.
 
-## Compatibility bridge
+## Compatibility bridge still present
 
-The old `SimulatorEngine` still backs legacy replay routes. Its random-access CSV implementation has been moved into the new source layer and imported back into the old engine. This is intentional: migrate behavior toward the new architecture while reducing duplicate code rather than cloning the old engine.
+Legacy replay/workload code still exists while callers are migrated. Do not add new behavior to `ProtocolMode = opcua|mqtt|both`, `MultiSimulatorEngine`, `DualProtocolAdapter`, or other protocol-combination paths.
 
-Do not extend `ProtocolMode = opcua|mqtt|both` into new functionality. It exists for legacy compatibility only.
+The migration strategy is caller migration followed by deletion, not parallel feature development in both architectures.
 
-## Next migration work
+## Current known work
 
-The architecture is now present, but the migration is not complete. Priorities are:
+1. complete local Windows end-to-end validation of concurrent OPC UA and API targets;
+2. continue UI/UX refinement and rendered visual QA;
+3. surface adapter validation in the UI before Start instead of waiting for target startup errors;
+4. populate the newer retry/success/latency target-delivery metrics in `_TargetRunner`;
+5. migrate remaining legacy replay/workload callers to `SimulationManager` and delete protocol-combination layers;
+6. consolidate remaining duplicate background-worker/job-control logic;
+7. reduce remaining high-complexity generator and asyncua compatibility functions;
+8. add dedicated HTTP/API listener support only if a concrete integration requires per-target bind/port isolation;
+9. add richer API response/error rules only for concrete integration needs rather than introducing a scripting engine.
 
-1. migrate Portal workflow/UI from legacy replay/job concepts to first-class Simulation Definitions;
-2. replace shared OPC UA rebuild-on-membership-change with incremental groups/namespaces;
-3. adapt SQL Server projection as a real target with a persistent/batched writer rather than per-request Portal scripting;
-4. consolidate SAP/OData behavior into a unified interface adapter instead of parallel applications;
-5. migrate LIMS/ODBC serving into the same target/host ownership model where applicable;
-6. move legacy replay/workload callers onto `SimulationManager`, then delete `MultiSimulatorEngine`, `DualProtocolAdapter`, and protocol-combination models when no callers remain;
-7. retire disabled API Studio and its port/UI plumbing;
-8. migrate Portal's hand-written HTTP control server to FastAPI;
-9. tighten release packaging to an explicit runtime allowlist;
-10. continue generator complexity reduction without introducing strategy-class forests.
-
-Every deletion must follow caller migration and tests. The goal is less code and fewer concepts at the end of migration than at the beginning.
+Every migration should reduce duplicate code or concepts. New abstractions must earn their existence through more than one real implementation or a clear reduction in complexity.
