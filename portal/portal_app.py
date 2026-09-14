@@ -55,9 +55,6 @@ def env_port(name: str, default: int, fallback_name: str | None = None) -> int:
 
 PORT = env_port("PORTAL_PORT", 8001)
 INDUSTRIAL_PORT = env_port("INDUSTRIAL_PORT", 8000, "INDUSTRIAL_WEB_PORT")
-# Compatibility only for the legacy page while launcher port persistence is
-# migrated. API Studio itself is retired and is not started or packaged.
-API_STUDIO_PORT = env_port("API_STUDIO_PORT", 5050, "PORT")
 OPCUA_PORT = env_port("OPCUA_PORT", 4840)
 MQTT_BROKER_PORT = env_port("MQTT_BROKER_PORT", 1883, "MQTT_PORT")
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -151,11 +148,7 @@ def page() -> str:
 
 def legacy_page() -> str:
     template = (PORTAL_ROOT / "simulator_ui.html").read_text(encoding="utf-8")
-    config = {
-        **launcher_config(),
-        "api_studio_port": API_STUDIO_PORT,
-    }
-    template = inject_launcher_config(template, config)
+    template = inject_launcher_config(template, launcher_config())
     replacements = {
         'id="lpPortal" value="8001"': f'id="lpPortal" value="{PORT}"',
         'id="lpIndustrial" value="8000"': f'id="lpIndustrial" value="{INDUSTRIAL_PORT}"',
@@ -190,7 +183,6 @@ def suite_status() -> dict[str, Any]:
     return {
         "portal": {"ok": True, "port": PORT},
         "industrial": get_service(f"http://127.0.0.1:{INDUSTRIAL_PORT}/api/health"),
-        "api_studio": {"ok": False, "retired": True},
     }
 
 
