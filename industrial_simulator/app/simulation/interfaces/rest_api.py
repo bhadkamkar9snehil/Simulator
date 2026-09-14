@@ -16,6 +16,7 @@ from ..models import SignalDefinition, SimulationFrame, TargetBinding, TargetRun
 router = APIRouter(prefix="/sim-api", tags=["Simulated APIs"])
 
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+_RESPONSE_MODES = {"values", "frame", "record", "history", "template"}
 _TOKEN_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
 _SEGMENT_PARAM_RE = re.compile(r"^\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -63,10 +64,15 @@ def _parse_template(value: Any) -> Any:
         raise ValueError(f"API response template is not valid JSON: {exc.msg}") from exc
 
 
+def _path_parts(path: str) -> list[str]:
+    cleaned = _clean_path(path).strip("/")
+    return [] if not cleaned else cleaned.split("/")
+
+
 def _path_pattern(path: str) -> re.Pattern[str]:
     names: list[str] = []
     parts: list[str] = []
-    for segment in _clean_path(path).strip("/").split("/"):
+    for segment in _path_parts(path):
         match = _SEGMENT_PARAM_RE.fullmatch(segment)
         if match:
             name = match.group(1)
@@ -78,7 +84,66 @@ def _path_pattern(path: str) -> re.Pattern[str]:
             raise ValueError(f"Invalid API path segment: {segment}")
         else:
             parts.append(re.escape(segment))
-    return re.compile(r"^/" + "/".join(parts) + r"/?$")
+    suffix = "/".join(parts)
+    return re.compile(r"^/" + suffix + r"/?$")
+
+
+def _route_shape(path: str) -> tuple[str, ...]:
+    shape: list[str] = []
+    for segment in _path_parts(path):
+        shape.append("{}" if _SEGMENT_PARAM_RE.fullmatch(segment) else segment)
+    return tuple(shape)
+
+
+def _specificity(path: str) -> tuple[int, int]:
+    parts = _path_parts(path)
+    static_count = sum(1 for segment in parts if not _SEGMENT_PARAM_RE.fullmatch(segment))
+    return static_count, len(parts)
+
+
+def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
+    method = str(config.get("method", "GET")).strip().upper()
+    if method not in _ALLOWED_METHODS:
+        raise ValueError(f"Unsupported API method: {method}")
+
+    path = _clean_path(str(config.get("path", "/")))
+    _path_pattern(path)
+
+    response_mode = str(config.get("response_mode", "values")).strip().lower()
+    if response_mode not in _RESPONSE_MODES:
+        raise ValueError(f"Unsupported API response mode: {response_mode}")
+
+    status_code = int(config.get("status_code", 200))
+    empty_status_code = int(config.get("empty_status_code", 503))
+    if not 100 <= status_code <= 599 or not 100 <= empty_status_code <= 599:
+        raise ValueError("API status codes must be between 100 and 599.")
+
+    delay_ms = int(config.get("delay_ms", 0))
+    history_size = int(config.get("history_size", 100))
+    if not 0 <= delay_ms <= 300_000:
+        raise ValueError("API delay_ms must be between 0 and 300000.")
+    if not 1 <= history_size <= 100_000:
+        raise ValueError("API history_size must be between 1 and 100000.")
+
+    headers = _parse_headers(config.get("response_headers"))
+    required_headers = _parse_headers(config.get("required_headers"))
+    template = _parse_template(config.get("response_template"))
+    return {
+        "method": method,
+        "path": path,
+        "response_mode": response_mode,
+        "status_code": status_code,
+        "empty_status_code": empty_status_code,
+        "delay_ms": delay_ms,
+        "history_size": history_size,
+        "fields": _parse_fields(config.get("fields")),
+        "envelope": str(config.get("envelope", "")).strip(),
+        "include_context": bool(config.get("include_context", False)),
+        "include_system_fields": bool(config.get("include_system_fields", True)),
+        "response_headers": headers,
+        "required_headers": required_headers,
+        "response_template": template,
+    }
 
 
 @dataclass
@@ -118,49 +183,19 @@ class ApiRegistry:
         self._items: dict[tuple[str, str], ApiProjection] = {}
 
     def register(self, simulation_id: str, target_id: str, config: dict[str, Any]) -> ApiProjection:
-        method = str(config.get("method", "GET")).strip().upper()
-        if method not in _ALLOWED_METHODS:
-            raise ValueError(f"Unsupported API method: {method}")
-        path = _clean_path(str(config.get("path", f"/{simulation_id}/{target_id}")))
-        pattern = _path_pattern(path)
+        validated = validate_api_config(config)
+        method = validated["method"]
+        path = validated["path"]
+        shape = _route_shape(path)
         for existing in self._items.values():
-            if existing.method == method and existing.path == path:
-                raise ValueError(f"API route already in use: {method} /sim-api{path}")
-
-        response_mode = str(config.get("response_mode", "values")).strip().lower()
-        if response_mode not in {"values", "frame", "record", "history", "template"}:
-            raise ValueError(f"Unsupported API response mode: {response_mode}")
-
-        status_code = int(config.get("status_code", 200))
-        empty_status_code = int(config.get("empty_status_code", 503))
-        if not 100 <= status_code <= 599 or not 100 <= empty_status_code <= 599:
-            raise ValueError("API status codes must be between 100 and 599.")
-
-        delay_ms = int(config.get("delay_ms", 0))
-        history_size = int(config.get("history_size", 100))
-        if not 0 <= delay_ms <= 300_000:
-            raise ValueError("API delay_ms must be between 0 and 300000.")
-        if not 1 <= history_size <= 100_000:
-            raise ValueError("API history_size must be between 1 and 100000.")
+            if existing.method == method and _route_shape(existing.path) == shape:
+                raise ValueError(f"API route conflicts with {existing.method} /sim-api{existing.path}")
 
         projection = ApiProjection(
             simulation_id=simulation_id,
             target_id=target_id,
-            method=method,
-            path=path,
-            response_mode=response_mode,
-            status_code=status_code,
-            empty_status_code=empty_status_code,
-            delay_ms=delay_ms,
-            fields=_parse_fields(config.get("fields")),
-            envelope=str(config.get("envelope", "")).strip(),
-            include_context=bool(config.get("include_context", False)),
-            include_system_fields=bool(config.get("include_system_fields", True)),
-            response_headers=_parse_headers(config.get("response_headers")),
-            required_headers=_parse_headers(config.get("required_headers")),
-            response_template=_parse_template(config.get("response_template")),
-            history_size=history_size,
-            pattern=pattern,
+            pattern=_path_pattern(path),
+            **validated,
         )
         self._items[(simulation_id, target_id)] = projection
         return projection
@@ -170,15 +205,18 @@ class ApiRegistry:
 
     def match(self, method: str, path: str) -> tuple[ApiProjection, dict[str, str]]:
         clean = _clean_path(path)
-        path_matches: list[tuple[ApiProjection, re.Match[str]]] = []
+        matches: list[tuple[ApiProjection, re.Match[str]]] = []
         for item in self._items.values():
             match = item.pattern.fullmatch(clean)
             if match:
-                path_matches.append((item, match))
-                if item.method == method:
-                    return item, match.groupdict()
-        if path_matches:
-            allowed = ", ".join(sorted({item.method for item, _ in path_matches}))
+                matches.append((item, match))
+
+        method_matches = [(item, match) for item, match in matches if item.method == method]
+        if method_matches:
+            item, match = max(method_matches, key=lambda pair: _specificity(pair[0].path))
+            return item, match.groupdict()
+        if matches:
+            allowed = ", ".join(sorted({item.method for item, _ in matches}))
             raise HTTPException(status_code=405, detail="Method not allowed.", headers={"Allow": allowed})
         raise HTTPException(status_code=404, detail=f"Simulated API route not found: {clean}")
 
@@ -208,6 +246,7 @@ class RestApiTarget:
         self._projection: ApiProjection | None = None
         self._endpoint: str | None = None
         self._state = "created"
+        self._last_details: dict[str, Any] = {}
 
     async def start(self, simulation_id: str, simulation_name: str, schema: list[SignalDefinition]) -> None:
         if self.binding.hosting_mode != "shared":
@@ -216,33 +255,43 @@ class RestApiTarget:
         self._projection = api_registry.register(simulation_id, self.target_id, self.binding.config)
         self._endpoint = f"{self._projection.method} /sim-api{self._projection.path}"
         self._state = "running"
+        self._last_details = self._details(self._projection)
 
     async def publish(self, frame: SimulationFrame) -> None:
         if self._projection is None:
             raise RuntimeError("API target is not started.")
         self._projection.publish(frame)
+        self._last_details = self._details(self._projection)
 
     async def stop(self) -> None:
+        if self._projection is not None:
+            self._last_details = self._details(self._projection)
         if self._simulation_id:
             api_registry.remove(self._simulation_id, self.target_id)
         self._projection = None
         self._state = "stopped"
 
     def status(self) -> TargetRuntimeStatus:
-        projection = self._projection
+        details = self._details(self._projection) if self._projection else dict(self._last_details)
         return TargetRuntimeStatus(
             target_id=self.target_id,
             kind="api",
             state=self._state,  # type: ignore[arg-type]
             endpoint=self._endpoint,
-            details={
-                "request_count": projection.request_count if projection else 0,
-                "last_request_at": projection.last_request_at if projection else None,
-                "history_count": len(projection.history) if projection else 0,
-                "method": projection.method if projection else None,
-                "path": f"/sim-api{projection.path}" if projection else None,
-            },
+            details=details,
         )
+
+    @staticmethod
+    def _details(projection: ApiProjection | None) -> dict[str, Any]:
+        if projection is None:
+            return {}
+        return {
+            "request_count": projection.request_count,
+            "last_request_at": projection.last_request_at,
+            "history_count": len(projection.history),
+            "method": projection.method,
+            "path": f"/sim-api{projection.path}",
+        }
 
 
 def _signal_values(frame: SimulationFrame) -> dict[str, Any]:
@@ -360,8 +409,3 @@ async def simulated_api_root(request: Request) -> JSONResponse:
 @router.api_route("/{request_path:path}", methods=sorted(_ALLOWED_METHODS))
 async def simulated_api(request: Request, request_path: str) -> JSONResponse:
     return await _dispatch(request, "/" + request_path)
-
-
-@router.get("/_simulator/routes", include_in_schema=False)
-def simulated_api_routes() -> list[dict[str, Any]]:
-    return api_registry.endpoints()
