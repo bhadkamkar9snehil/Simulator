@@ -22,6 +22,12 @@ def _frame(sequence: int, temperature: float) -> SimulationFrame:
     )
 
 
+def _order_frame(sequence: int, order_id: str, temperature: float) -> SimulationFrame:
+    frame = _frame(sequence, temperature)
+    frame.values["OrderId"] = SignalValue(value=order_id, data_type="String")
+    return frame
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
@@ -67,12 +73,16 @@ def test_api_target_templates_live_data_and_request_inputs() -> None:
             "batch": "B-42",
             "sequence": 7,
         }
-        assert target.status().details["request_count"] == 1
+        details = target.status().details
+        assert details["request_count"] == 1
+        assert details["success_count"] == 1
+        assert details["last_status_code"] == 201
+        assert details["last_latency_ms"] is not None
     finally:
         asyncio.run(target.stop())
 
 
-def test_api_target_rejects_missing_required_header() -> None:
+def test_api_target_rejects_missing_required_header_and_counts_client_error() -> None:
     target = RestApiTarget(TargetBinding(
         target_id="secured-api",
         kind="api",
@@ -88,6 +98,10 @@ def test_api_target_rejects_missing_required_header() -> None:
     try:
         response = _client().get("/sim-api/secure")
         assert response.status_code == 401
+        details = target.status().details
+        assert details["request_count"] == 1
+        assert details["client_error_count"] == 1
+        assert details["last_status_code"] == 401
     finally:
         asyncio.run(target.stop())
 
@@ -134,6 +148,113 @@ def test_api_history_uses_same_canonical_frames() -> None:
         payload = _client().get("/sim-api/history").json()
         assert [item["Temperature"] for item in payload["items"]] == [2.0, 3.0]
         assert all(item["Batch"] == "B-42" for item in payload["items"])
+    finally:
+        asyncio.run(target.stop())
+
+
+def test_history_response_supports_order_offset_and_limit() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="paged-history",
+        kind="api",
+        config={
+            "method": "GET",
+            "path": "/paged-history",
+            "response_mode": "history",
+            "fields": "Temperature",
+            "include_system_fields": False,
+            "history_size": 5,
+            "history_order": "newest_first",
+            "default_page_size": 2,
+            "max_page_size": 3,
+        },
+    ))
+    asyncio.run(target.start("sim-api-test", "API test", []))
+    for sequence, temperature in enumerate([1.0, 2.0, 3.0, 4.0]):
+        asyncio.run(target.publish(_frame(sequence, temperature)))
+    try:
+        first = _client().get("/sim-api/paged-history").json()
+        assert [item["Temperature"] for item in first] == [4.0, 3.0]
+        page = _client().get("/sim-api/paged-history?offset=1&limit=2").json()
+        assert [item["Temperature"] for item in page] == [3.0, 2.0]
+        invalid = _client().get("/sim-api/paged-history?limit=4")
+        assert invalid.status_code == 400
+        assert target.status().details["client_error_count"] == 1
+    finally:
+        asyncio.run(target.stop())
+
+
+def test_history_match_selects_retained_frame_without_moving_simulation() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="order-lookup",
+        kind="api",
+        config={
+            "method": "GET",
+            "path": "/lookup/{order_id}",
+            "selection_mode": "history_match",
+            "match_frame": "values.OrderId",
+            "match_request": "path.order_id",
+            "response_mode": "record",
+            "fields": "OrderId,Temperature",
+            "include_system_fields": False,
+            "not_found_status": 404,
+        },
+    ))
+    asyncio.run(target.start("sim-api-test", "API test", []))
+    asyncio.run(target.publish(_order_frame(0, "A-1", 21.5)))
+    asyncio.run(target.publish(_order_frame(1, "A-2", 22.5)))
+    try:
+        found = _client().get("/sim-api/lookup/A-1")
+        assert found.status_code == 200
+        assert found.json() == {"Temperature": 21.5, "OrderId": "A-1"}
+        missing = _client().get("/sim-api/lookup/A-9")
+        assert missing.status_code == 404
+        details = target.status().details
+        assert details["request_count"] == 2
+        assert details["success_count"] == 1
+        assert details["client_error_count"] == 1
+    finally:
+        asyncio.run(target.stop())
+
+
+def test_api_can_serve_text_or_xml_with_template_tokens() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="xml-api",
+        kind="api",
+        config={
+            "method": "GET",
+            "path": "/xml/{id}",
+            "body_mode": "text",
+            "media_type": "application/xml",
+            "text_template": '<reading id="${path.id}">${values.Temperature}</reading>',
+        },
+    ))
+    asyncio.run(target.start("sim-api-test", "API test", []))
+    asyncio.run(target.publish(_frame(3, 19.75)))
+    try:
+        response = _client().get("/sim-api/xml/T-1")
+        assert response.status_code == 200
+        assert response.text == '<reading id="T-1">19.75</reading>'
+        assert response.headers["content-type"].startswith("application/xml")
+    finally:
+        asyncio.run(target.stop())
+
+
+def test_api_can_return_explicitly_empty_body() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="no-content-api",
+        kind="api",
+        config={
+            "method": "POST",
+            "path": "/accepted",
+            "body_mode": "empty",
+            "status_code": 204,
+        },
+    ))
+    asyncio.run(target.start("sim-api-test", "API test", []))
+    try:
+        response = _client().post("/sim-api/accepted", json={"value": 1})
+        assert response.status_code == 204
+        assert response.content == b""
     finally:
         asyncio.run(target.stop())
 
@@ -197,6 +318,9 @@ def test_api_target_keeps_request_metrics_after_stop() -> None:
     status = target.status()
     assert status.state == "stopped"
     assert status.details["request_count"] == 1
+    assert status.details["success_count"] == 1
+    assert status.details["last_status_code"] == 200
+    assert status.details["last_latency_ms"] is not None
     assert status.details["path"] == "/sim-api/metrics"
 
 
