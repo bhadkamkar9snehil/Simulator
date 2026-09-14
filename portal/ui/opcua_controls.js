@@ -27,15 +27,20 @@ async function refreshInterfaces() {
   content.innerHTML = renderInterfaces(status);
 }
 
+async function invokeAction(action, simulationId) {
+  const invoke = actions[action];
+  if (!invoke || !simulationId) return null;
+  return invoke(simulationId);
+}
+
 async function control(button) {
   const action = button.dataset.opcAction;
   const simulationId = button.dataset.simulationId;
-  const invoke = actions[action];
-  if (!invoke || !simulationId) return;
+  if (!actions[action] || !simulationId) return;
 
   button.disabled = true;
   try {
-    const result = await invoke(simulationId);
+    const result = await invokeAction(action, simulationId);
     await refreshInterfaces();
     notify(`${simulationId}: ${result?.state || action}.`, "success");
   } catch (error) {
@@ -44,8 +49,31 @@ async function control(button) {
   }
 }
 
+async function controlMany(button) {
+  const action = button.dataset.opcBulkAction;
+  const simulationIds = String(button.dataset.simulationIds || "").split(",").filter(Boolean);
+  if (!actions[action] || !simulationIds.length) return;
+
+  button.disabled = true;
+  try {
+    // Sequential execution is deliberate. Restarting every member concurrently
+    // could temporarily remove the final group and bounce the shared listener.
+    for (const simulationId of simulationIds) await invokeAction(action, simulationId);
+    await refreshInterfaces();
+    notify(`${action} applied to ${simulationIds.length} simulations.`, "success");
+  } catch (error) {
+    button.disabled = false;
+    await refreshInterfaces().catch(() => {});
+    notify(error.message || String(error), "error");
+  }
+}
+
 document.addEventListener("click", (event) => {
+  const bulk = event.target.closest("[data-opc-bulk-action]");
+  if (bulk) {
+    controlMany(bulk);
+    return;
+  }
   const button = event.target.closest("[data-opc-action]");
-  if (!button) return;
-  control(button);
+  if (button) control(button);
 });
