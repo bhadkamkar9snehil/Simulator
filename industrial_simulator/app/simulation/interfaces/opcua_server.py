@@ -87,6 +87,25 @@ class UnifiedOpcUaServer(OpcUaTagServer):
         self._ensure_certificate_files(cert_file, key_file)
         return cert_file, key_file
 
+    @staticmethod
+    def _tag_from_signal(
+        signal: SignalDefinition,
+        node_map: dict[str, str],
+        data_types: dict[str, str],
+        writable_signals: set[str],
+    ) -> TagMapping:
+        kwargs: dict[str, Any] = {
+            "enabled": True,
+            "csv_column": signal.name,
+            "tag_name": signal.name,
+            "node_id": node_map[signal.name],
+            "data_type": data_types[signal.name],
+            "writable": signal.name in writable_signals,
+        }
+        if "initial_value" in signal.model_fields_set:
+            kwargs["initial_value"] = signal.initial_value
+        return TagMapping(**kwargs)
+
     async def configure_signals(
         self,
         namespace_uri: str,
@@ -97,18 +116,7 @@ class UnifiedOpcUaServer(OpcUaTagServer):
         writable_signals: set[str],
     ) -> None:
         """Adapt unified signal definitions into the canonical tag configuration path."""
-        tags = [
-            TagMapping(
-                enabled=True,
-                csv_column=signal.name,
-                tag_name=signal.name,
-                node_id=node_map[signal.name],
-                data_type=data_types[signal.name],
-                initial_value=signal.initial_value,
-                writable=signal.name in writable_signals,
-            )
-            for signal in schema
-        ]
+        tags = [self._tag_from_signal(signal, node_map, data_types, writable_signals) for signal in schema]
         config = ReplayConfig(
             protocol="opcua",
             namespace_uri=namespace_uri,
