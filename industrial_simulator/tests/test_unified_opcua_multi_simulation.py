@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from app.simulation.interfaces import opcua as opcua_module
-from app.simulation.models import ClockSpec, SimulationDefinition, SourceBinding, TargetBinding
+from app.simulation.models import ClockSpec, SignalDefinition, SignalValue, SimulationDefinition, SimulationFrame, SourceBinding, TargetBinding
 from app.simulation.runtime import SimulationManager
 
 
@@ -54,6 +54,37 @@ class _FakeOpcUaServer:
         return self.advertised_endpoint
 
 
+class _FailFirstStartServer(_FakeOpcUaServer):
+    should_fail = True
+
+    async def start(self):
+        if self.running:
+            return
+        self.start_count += 1
+        if type(self).should_fail:
+            type(self).should_fail = False
+            await asyncio.sleep(0)
+            raise RuntimeError("intentional first start failure")
+        self.running = True
+
+
+def _binding() -> TargetBinding:
+    return TargetBinding(
+        target_id="opcua",
+        kind="opcua",
+        hosting_mode="shared",
+        failure_policy="stop_simulation",
+        config={
+            "bind_host": "0.0.0.0",
+            "advertised_host": "localhost",
+            "port": 4840,
+            "path": "simulator",
+            "namespace_uri": "http://local/unified-simulator",
+            "root_folder": "Simulations",
+        },
+    )
+
+
 def _definition(simulation_id: str, start: int) -> SimulationDefinition:
     return SimulationDefinition(
         simulation_id=simulation_id,
@@ -64,22 +95,7 @@ def _definition(simulation_id: str, start: int) -> SimulationDefinition:
         ),
         clock=ClockSpec(frequency_hz=20.0),
         loop_mode="loop_forever",
-        targets=[
-            TargetBinding(
-                target_id="opcua",
-                kind="opcua",
-                hosting_mode="shared",
-                failure_policy="stop_simulation",
-                config={
-                    "bind_host": "0.0.0.0",
-                    "advertised_host": "localhost",
-                    "port": 4840,
-                    "path": "simulator",
-                    "namespace_uri": "http://local/unified-simulator",
-                    "root_folder": "Simulations",
-                },
-            )
-        ],
+        targets=[_binding()],
     )
 
 
@@ -146,5 +162,45 @@ def test_shared_opcua_simulations_have_independent_lifecycle_controls(monkeypatc
         assert manager.hosts.status()["shared_opcua_hosts"] == {}
         assert server.stop_count == 1
         await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_failed_concurrent_join_cannot_orphan_successful_shared_member(monkeypatch) -> None:
+    monkeypatch.setattr(opcua_module, "OpcUaTagServer", _FailFirstStartServer)
+    monkeypatch.setattr(opcua_module, "Server", object())
+    _FakeOpcUaServer.instances.clear()
+    _FailFirstStartServer.should_fail = True
+
+    async def run() -> None:
+        hosts = opcua_module.InterfaceHostManager()
+        schema = [SignalDefinition(name="value", node_id="value", data_type="Double")]
+        results = await asyncio.gather(
+            hosts.acquire_opcua("sim-a", "A", _binding(), schema),
+            hosts.acquire_opcua("sim-b", "B", _binding(), schema),
+            return_exceptions=True,
+        )
+        failures = [item for item in results if isinstance(item, Exception)]
+        handles = [item for item in results if isinstance(item, opcua_module.OpcUaHandle)]
+        assert len(failures) == 1
+        assert len(handles) == 1
+
+        handle = handles[0]
+        status = hosts.status()["shared_opcua_hosts"]["0.0.0.0:4840"]
+        assert status["target_count"] == 1
+        assert status["pending_targets"] == 0
+        assert status["simulation_targets"][0]["simulation_id"] == handle.simulation_id
+
+        await hosts.publish_opcua(
+            handle,
+            SimulationFrame(
+                simulation_id=handle.simulation_id,
+                values={"value": SignalValue(value=42.0, data_type="Double")},
+            ),
+        )
+        assert handle.server.variables[handle.node_map["value"]]["value"] == 42.0
+
+        await hosts.release_opcua(handle)
+        assert hosts.status()["shared_opcua_hosts"] == {}
 
     asyncio.run(run())
