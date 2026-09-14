@@ -241,6 +241,14 @@ class SimulationInstance:
             self.updated_at = utc_now_iso()
             return self.status()
 
+    async def reset_cursor(self) -> SimulationStatus:
+        async with self.lifecycle_lock:
+            return await self._seek_paused(self.start_position)
+
+    async def seek(self, position: int) -> SimulationStatus:
+        async with self.lifecycle_lock:
+            return await self._seek_paused(position)
+
     def status(self) -> SimulationStatus:
         targets = [runner.status() for runner in self.runners] if self.runners else list(self.last_target_statuses)
         visible_state = "degraded" if self.state == "running" and any(item.state == "error" for item in targets) else self.state
@@ -257,6 +265,21 @@ class SimulationInstance:
             last_error=self.last_error,
             targets=targets,
         )
+
+    async def _seek_paused(self, position: int) -> SimulationStatus:
+        if self.state != "paused":
+            raise ValueError("Pause the simulation before changing its cursor.")
+        source = self.source
+        if source is None:
+            raise ValueError("Simulation source is not open.")
+        await asyncio.gather(*(runner.drain() for runner in self.runners))
+        await source.seek(position)
+        self.direction = 1
+        self.clock.reset()
+        self.last_frame = None
+        self.last_source_position = source.position
+        self.updated_at = utc_now_iso()
+        return self.status()
 
     def _reset_run_state(self) -> None:
         self.last_error = None
@@ -292,6 +315,9 @@ class SimulationInstance:
                     self.updated_at = utc_now_iso()
                     break
                 await self.clock.wait(frame)
+                await self.run_gate.wait()
+                if self.state != "running":
+                    continue
                 frame = self._decorate_frame(frame)
                 self.last_frame = frame
                 await asyncio.gather(*(runner.enqueue(frame) for runner in self.runners))
@@ -440,6 +466,19 @@ class SimulationManager:
 
     async def stop(self, simulation_id: str) -> SimulationStatus:
         return await self._instance(simulation_id).stop()
+
+    async def restart(self, simulation_id: str) -> SimulationStatus:
+        self._definition(simulation_id)
+        instance = self.instances.get(simulation_id)
+        if instance is not None:
+            await instance.stop()
+        return await self.start(simulation_id)
+
+    async def reset_cursor(self, simulation_id: str) -> SimulationStatus:
+        return await self._instance(simulation_id).reset_cursor()
+
+    async def seek(self, simulation_id: str, position: int) -> SimulationStatus:
+        return await self._instance(simulation_id).seek(position)
 
     def get_definition(self, simulation_id: str) -> SimulationDefinition:
         return self._definition(simulation_id)
