@@ -143,6 +143,14 @@ export function canStop(status) {
   return ["running", "paused", "degraded", "starting"].includes(status?.state);
 }
 
+export function canRestart(status) {
+  return status?.state !== "starting";
+}
+
+export function canMoveCursor(status) {
+  return status?.state === "paused";
+}
+
 export function getPath(object, path) {
   return path.split(".").reduce((current, key) => current?.[key], object);
 }
