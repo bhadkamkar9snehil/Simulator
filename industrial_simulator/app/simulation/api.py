@@ -49,8 +49,12 @@ def capabilities() -> dict[str, Any]:
         },
         "api_target": {
             "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+            "body_modes": ["json", "text", "empty"],
             "response_modes": ["values", "frame", "record", "history", "template"],
+            "selection_modes": ["current", "history_match"],
+            "history_orders": ["oldest_first", "newest_first"],
             "template_scopes": ["values", "context", "meta", "path", "query", "body"],
+            "history_query": ["offset", "limit"],
             "public_prefix": "/sim-api",
         },
         "controls": ["start", "pause", "resume", "stop", "restart", "reset_cursor", "seek"],
