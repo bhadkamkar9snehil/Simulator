@@ -63,6 +63,40 @@ function sharedMembers(host) {
   </tr>`).join("")}</tbody></table></div>`;
 }
 
+function diagnosticsBlock(host) {
+  const diagnostics = host.diagnostics || {};
+  const sessions = diagnostics.sessions || [];
+  const activity = diagnostics.recent_activity || [];
+  const sessionRows = sessions.length ? `<div class="table-shell" style="margin-top:10px"><table class="data-table"><thead><tr><th>Client</th><th>State</th><th>User</th><th>Subscriptions</th><th>Activity age</th></tr></thead><tbody>${sessions.map((session) => `<tr>
+    <td>${esc(session.name || "client")}</td>
+    <td>${esc(session.state || "unknown")}</td>
+    <td>${esc(session.user || "—")}</td>
+    <td>${session.subscriptions ?? 0}</td>
+    <td>${session.last_activity_age_seconds == null ? "—" : `${esc(session.last_activity_age_seconds)} s`}</td>
+  </tr>`).join("")}</tbody></table></div>` : "";
+  const activityRows = activity.length ? `<div class="table-shell" style="margin-top:10px"><table class="data-table"><thead><tr><th>Time</th><th>Operation</th><th>Nodes</th><th>Failed</th></tr></thead><tbody>${activity.slice(0, 10).map((item) => `<tr>
+    <td class="mono">${esc(item.at || "—")}</td>
+    <td>${esc(String(item.kind || "").toUpperCase())}</td>
+    <td>${item.node_count ?? 0}</td>
+    <td>${item.failed ?? 0}</td>
+  </tr>`).join("")}</tbody></table></div>` : "";
+  return `<section class="interface-diagnostics" style="margin-top:12px">
+    <h4>Live diagnostics</h4>
+    <dl class="key-value">
+      <dt>Clients</dt><dd>${diagnostics.connected_clients ?? 0}</dd>
+      <dt>Sessions</dt><dd>${diagnostics.session_count ?? 0}</dd>
+      <dt>Read requests</dt><dd>${diagnostics.read_requests ?? 0}</dd>
+      <dt>Nodes read</dt><dd>${diagnostics.read_nodes ?? 0}</dd>
+      <dt>Write requests</dt><dd>${diagnostics.write_requests ?? 0}</dd>
+      <dt>Nodes written</dt><dd>${diagnostics.write_nodes ?? 0}</dd>
+      <dt>Failed writes</dt><dd>${diagnostics.failed_writes ?? 0}</dd>
+      <dt>Introspection</dt><dd>${host.diagnostics_available === false ? "Unavailable" : "Available"}</dd>
+    </dl>
+    ${sessionRows}
+    ${activityRows}
+  </section>`;
+}
+
 function sharedHostCard(key, host) {
   return `<article class="host-card">
     <h3>Shared OPC UA</h3>
@@ -81,6 +115,7 @@ function sharedHostCard(key, host) {
     </dl>
     ${bulkControls(host)}
     ${sharedMembers(host)}
+    ${diagnosticsBlock(host)}
   </article>`;
 }
 
@@ -99,6 +134,7 @@ function dedicatedHostCard(key, host) {
       <dt>Authentication</dt><dd>${esc(host.authentication || "anonymous")}</dd>
     </dl>
     ${host.simulation_id ? memberControls(host.simulation_id, host.simulation_state) : ""}
+    ${diagnosticsBlock(host)}
   </article>`;
 }
 
