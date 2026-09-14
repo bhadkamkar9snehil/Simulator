@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OPC UA/MQTT/API Simulator</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/opcua-diagnostics.css" />
 </head>
 <body>
   <header class="topbar">
@@ -23,6 +24,9 @@
       <div><span>Cursor</span><strong id="cursorStatus">0 / 0</strong></div>
       <div><span>Hz</span><strong id="freqStatus">-</strong></div>
       <div><span>Tags</span><strong id="tagStatus">0</strong></div>
+      <div><span>OPC Clients</span><strong id="opcClientCount">0</strong></div>
+      <div><span>OPC Reads</span><strong id="opcReadCount">0</strong></div>
+      <div><span>OPC Writes</span><strong id="opcWriteCount">0</strong></div>
     </div>
     <div class="quick-actions">
       <button id="refreshStatusBtn">Refresh</button>
@@ -205,6 +209,23 @@
           <pre id="rawStatus" class="status-pre">{}</pre>
         </div>
       </div>
+      <div class="card" id="opcDiagnosticsPanel">
+        <div class="card-header"><h3>OPC UA Live Diagnostics</h3><strong id="opcDiagAvailability">-</strong></div>
+        <div class="opc-diag-metrics">
+          <div><span>Connected clients</span><strong id="opcDiagClients">0</strong></div>
+          <div><span>Sessions</span><strong id="opcDiagSessions">0</strong></div>
+          <div><span>Read requests</span><strong id="opcDiagReads">0</strong></div>
+          <div><span>Nodes read</span><strong id="opcDiagReadNodes">0</strong></div>
+          <div><span>Write requests</span><strong id="opcDiagWrites">0</strong></div>
+          <div><span>Nodes written</span><strong id="opcDiagWriteNodes">0</strong></div>
+          <div><span>Failed writes</span><strong id="opcDiagFailedWrites">0</strong></div>
+          <div><span>Last activity</span><strong id="opcDiagLastActivity">-</strong></div>
+        </div>
+        <h4>Connected sessions</h4>
+        <div id="opcDiagSessionTable" class="table-wrap"><div class="hint">No connected sessions.</div></div>
+        <h4>Recent read / write activity</h4>
+        <div id="opcDiagActivityTable" class="table-wrap"><div class="hint">No activity yet.</div></div>
+      </div>
       <div class="card">
         <h3>Saved Configs</h3>
         <div id="configsTable" class="table-wrap"></div>
@@ -214,6 +235,6 @@
 
   <script src="/static/launcher-config.js?v=ports"></script>
   <script src="/static/app.js?v=8-port-selection"></script>
-  <script src="/static/opcua-diagnostics.js?v=1"></script>
+  <script src="/static/opcua-diagnostics.js?v=3"></script>
 </body>
 </html>
