@@ -109,8 +109,14 @@ class InterfaceHostManager:
                 self._shared_opcua.pop(handle.key, None)
 
     async def publish_opcua(self, handle: OpcUaHandle, frame: SimulationFrame) -> None:
+        source_timestamp = frame.source_timestamp or frame.timestamp
         values = {
-            handle.node_map[name]: (signal.value, handle.data_types.get(name, signal.data_type))
+            handle.node_map[name]: (
+                signal.value,
+                handle.data_types.get(name, signal.data_type),
+                signal.quality,
+                source_timestamp,
+            )
             for name, signal in frame.values.items()
             if name in handle.node_map
         }
@@ -118,14 +124,14 @@ class InterfaceHostManager:
             return
 
         if not handle.shared:
-            await handle.server.update_values(values)
+            await handle.server.update_signals(values)
             return
 
         host = self._shared_opcua.get(handle.key)
         if host is None:
             raise RuntimeError("Shared OPC UA host is no longer available.")
         async with host.lock:
-            await host.server.update_values(values)
+            await host.server.update_signals(values)
 
     async def shutdown(self) -> None:
         async with self._manager_lock:
