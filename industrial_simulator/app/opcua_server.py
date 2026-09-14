@@ -186,15 +186,7 @@ def get_base_dir() -> Path:
 
 
 class OpcUaTagServer:
-    """Single-root OPC UA server for all selected files.
-
-    The server exposes exactly one root folder under Objects, normally:
-        Objects / TagSimulator
-
-    Multiple Excel/CSV files are represented below that same root by using
-    unique variable names/node ids. This avoids creating a new TagSimulator
-    folder every time another file is configured.
-    """
+    """Single-root OPC UA server for all configured tags."""
 
     def __init__(self, endpoint: str | None = None, advertised_endpoint: str | None = None):
         raw_port = str(os.environ.get("OPCUA_PORT", "4840")).strip()
@@ -240,16 +232,7 @@ class OpcUaTagServer:
         self.server.set_server_name("Industrial Dual Protocol Tag Simulator")
         if hasattr(self.server, "set_application_uri"):
             await self._maybe_await(self.server.set_application_uri(self.application_uri))
-
-        # UaExpert expects the server to return an application instance
-        # certificate during CreateSession, even when the selected endpoint is
-        # SecurityPolicy=None / MessageSecurityMode=None.  Earlier builds did
-        # not load a certificate, which caused: "Server did not return the
-        # certificate used to create the secure channel."  We therefore create
-        # and load a local self-signed server certificate, while still exposing
-        # only the NoSecurity endpoint for simple simulator use.
         await self._configure_uaexpert_friendly_no_security()
-
         self.idx = await self.server.register_namespace(self.namespace_uri)
         await self.server.start()
         _patch_asyncua_python314_property_annotations()
@@ -276,31 +259,37 @@ class OpcUaTagServer:
         if not self.mock_mode and self.server is not None:
             await self._run_in_server_loop(self._configure_tags_impl(config))
             return
-
         await self._configure_tags_impl(config)
 
     async def _configure_tags_impl(self, config: ReplayConfig) -> None:
         self.namespace_uri = config.namespace_uri
         self.variables.clear()
+        enabled_tags = [tag for tag in config.tags if tag.enabled]
+        node_ids = [str(tag.node_id).strip() for tag in enabled_tags]
+        if any(not node_id for node_id in node_ids):
+            raise ValueError("Every enabled OPC UA tag requires a non-empty NodeId.")
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("Enabled OPC UA tags must use unique NodeIds.")
 
         if self.mock_mode or self.server is None:
-            for tag in config.tags:
-                if tag.enabled:
-                    self.variables[tag.node_id] = {"value": tag.initial_value, "tag": tag}
+            for tag in enabled_tags:
+                self.variables[tag.node_id] = {"value": tag.initial_value, "tag": tag}
             return
 
         self.idx = await self.server.register_namespace(config.namespace_uri)
-
-        # One common root for all files. Do not create one root per Excel/CSV.
         self.root_folder = await self.server.nodes.objects.add_folder(self.idx, config.root_folder)
 
         used_names: set[str] = set()
-        for tag in config.tags:
-            if not tag.enabled:
-                continue
+        for tag in enabled_tags:
             browse_name = self._browse_name(tag.node_id, tag.tag_name, used_names)
             value = self._initial_value(tag.data_type, tag.initial_value)
-            var = await self.root_folder.add_variable(self.idx, browse_name, value)
+            if ua is None:  # pragma: no cover - real asyncua server implies ua exists
+                raise RuntimeError("asyncua UA types are unavailable.")
+            var = await self.root_folder.add_variable(
+                ua.NodeId(str(tag.node_id).strip(), self.idx),
+                browse_name,
+                value,
+            )
             if tag.writable:
                 await var.set_writable()
             self.variables[tag.node_id] = var
@@ -341,14 +330,11 @@ class OpcUaTagServer:
     async def _configure_uaexpert_friendly_no_security(self) -> None:
         if self.server is None:
             return
-
         cert_file, key_file = self._certificate_files()
         self._ensure_certificate_files(cert_file, key_file)
         self.certificate_path = str(cert_file)
-
         await self._maybe_await(self.server.load_certificate(str(cert_file)))
         await self._maybe_await(self.server.load_private_key(str(key_file)))
-
         if ua is not None and hasattr(self.server, "set_security_policy"):
             self.server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
             self.security_policy = "None"
@@ -361,7 +347,6 @@ class OpcUaTagServer:
     def _ensure_certificate_files(self, cert_file: Path, key_file: Path) -> None:
         if cert_file.exists() and key_file.exists():
             return
-
         try:
             from cryptography import x509
             from cryptography.hazmat.primitives import hashes, serialization
@@ -379,7 +364,6 @@ class OpcUaTagServer:
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Local Simulator"),
             x509.NameAttribute(NameOID.COMMON_NAME, "Industrial Dual Protocol Tag Simulator"),
         ])
-
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         now = dt.datetime.now(dt.timezone.utc)
         alt_names: list[x509.GeneralName] = [
@@ -389,7 +373,6 @@ class OpcUaTagServer:
             x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
             x509.IPAddress(ipaddress.ip_address("::1")),
         ]
-
         cert = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -423,7 +406,6 @@ class OpcUaTagServer:
             )
             .sign(private_key, hashes.SHA256())
         )
-
         key_file.write_bytes(
             private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
@@ -472,7 +454,6 @@ class OpcUaTagServer:
             loop.close()
 
     def _browse_name(self, node_id: str, tag_name: str, used_names: set[str]) -> str:
-        # Keep all file tags under one root and make every variable unique.
         name = (node_id or tag_name).replace(".", "_").replace(" ", "_")
         if not name:
             name = "Tag"
