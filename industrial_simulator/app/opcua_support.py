@@ -3,6 +3,14 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
+from app.opcua_types import (
+    coerce_value as coerce_opcua_value,
+    default_value,
+    is_supported_type,
+    status_code as canonical_status_code,
+    variant_type as canonical_variant_type,
+)
+
 try:
     from asyncua import ua  # type: ignore
     try:
@@ -23,21 +31,6 @@ SECURITY_POLICIES = {
     "none_and_basic256sha256",
 }
 AUTHENTICATION_MODES = {"anonymous", "username", "anonymous_or_username"}
-OPCUA_DATA_TYPES = {
-    "Double",
-    "Float",
-    "Int64",
-    "Int32",
-    "Int16",
-    "UInt64",
-    "UInt32",
-    "UInt16",
-    "Byte",
-    "SByte",
-    "Boolean",
-    "String",
-    "DateTime",
-}
 
 
 def normalize_server_options(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -130,7 +123,7 @@ def parse_type_overrides(value: Any, available: set[str]) -> dict[str, str]:
     unknown = sorted(set(raw) - available)
     if unknown:
         raise ValueError(f"Unknown OPC UA type override signal: {unknown[0]}")
-    invalid = sorted({data_type for data_type in raw.values() if data_type not in OPCUA_DATA_TYPES})
+    invalid = sorted({data_type for data_type in raw.values() if not is_supported_type(data_type)})
     if invalid:
         raise ValueError(f"Unsupported OPC UA data type: {invalid[0]}")
     return raw
@@ -198,41 +191,13 @@ class FixtureUserManager:
         return None
 
 
+# Compatibility facade only. Datatype semantics live in app.opcua_types.
 def variant_type(data_type: str) -> Any:
-    if ua is None:
-        return None
-    mapping = {
-        "Double": ua.VariantType.Double,
-        "Float": ua.VariantType.Float,
-        "Int64": ua.VariantType.Int64,
-        "Int32": ua.VariantType.Int32,
-        "Int16": ua.VariantType.Int16,
-        "UInt64": ua.VariantType.UInt64,
-        "UInt32": ua.VariantType.UInt32,
-        "UInt16": ua.VariantType.UInt16,
-        "Byte": ua.VariantType.Byte,
-        "SByte": ua.VariantType.SByte,
-        "Boolean": ua.VariantType.Boolean,
-        "String": ua.VariantType.String,
-        "DateTime": ua.VariantType.DateTime,
-    }
-    return mapping.get(data_type, ua.VariantType.String)
+    return canonical_variant_type(data_type)
 
 
-def status_code(quality: str | None) -> Any:
-    if ua is None:
-        return None
-    text = str(quality or "GOOD").strip()
-    normalized = text.replace("_", "").replace(" ", "").lower()
-    if normalized.startswith("bad"):
-        return ua.StatusCode(ua.StatusCodes.Bad)
-    if normalized.startswith("uncertain"):
-        return ua.StatusCode(ua.StatusCodes.Uncertain)
-    if normalized.startswith("good"):
-        return ua.StatusCode(ua.StatusCodes.Good)
-    by_name = {name.lower(): name for name in dir(ua.StatusCodes) if not name.startswith("_")}
-    resolved = by_name.get(text.lower())
-    return ua.StatusCode(getattr(ua.StatusCodes, resolved)) if resolved else ua.StatusCode(ua.StatusCodes.Good)
+def status_code(quality: Any) -> Any:
+    return canonical_status_code(quality)
 
 
 def opcua_timestamp(value: str | dt.datetime | None) -> dt.datetime | None:
@@ -249,37 +214,11 @@ def opcua_timestamp(value: str | dt.datetime | None) -> dt.datetime | None:
 
 
 def initial_value(data_type: str, value: Any) -> Any:
-    if value is not None:
-        return coerce_value(value, data_type)
-    if data_type in {"Double", "Float"}:
-        return 0.0
-    if data_type in {"Int64", "Int32", "Int16", "UInt64", "UInt32", "UInt16", "Byte", "SByte"}:
-        return 0
-    if data_type == "Boolean":
-        return False
-    if data_type == "DateTime":
-        return dt.datetime.now(dt.timezone.utc)
-    return ""
+    if value is None:
+        return default_value(data_type)
+    return coerce_opcua_value(data_type, value)
 
 
 def coerce_value(value: Any, data_type: str) -> Any:
-    if value is None:
-        return None
-    if data_type in {"Double", "Float"}:
-        return float(value)
-    if data_type in {"Int64", "Int32", "Int16", "UInt64", "UInt32", "UInt16", "Byte", "SByte"}:
-        number = int(float(value))
-        if data_type.startswith("UInt") or data_type == "Byte":
-            if number < 0:
-                raise ValueError(f"{data_type} cannot contain a negative value: {value}")
-        return number
-    if data_type == "Boolean":
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in {"true", "1", "yes", "y", "on"}
-    if data_type == "DateTime":
-        parsed = opcua_timestamp(value)
-        if parsed is None:
-            raise ValueError(f"DateTime value is invalid: {value}")
-        return parsed
-    return str(value)
+    """Legacy argument order facade over the canonical OPC UA coercion layer."""
+    return coerce_opcua_value(data_type, value)
