@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 
+from .interfaces.rest_api import api_registry
 from .models import SimulationDefinition, SimulationStatus, WorldDefinition
 from .preview import preview_definition
 from .runtime import simulation_manager
@@ -68,7 +69,10 @@ def runtime_snapshot() -> dict[str, Any]:
 
 @router.get("/interfaces")
 def interface_status() -> dict[str, Any]:
-    return simulation_manager.interface_status()
+    return {
+        **simulation_manager.interface_status(),
+        "api_routes": api_registry.endpoints(),
+    }
 
 
 @router.get("/simulations")
