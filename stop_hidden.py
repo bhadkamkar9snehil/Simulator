@@ -1,35 +1,57 @@
 from __future__ import annotations
+
 import json
 import os
 import subprocess
 import time
 from pathlib import Path
+
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 ROOT = Path(__file__).resolve().parent
 PIDS_JSON = ROOT / "runtime_pids.json"
 PORTS_JSON = ROOT / "simulator_ports.json"
-DEFAULT_PORTS = {"industrial_web_port":"8000","api_studio_port":"5050","portal_port":"8001","opcua_port":"4840","mqtt_broker_port":"1883"}
+DEFAULT_PORTS = {
+    "industrial_web_port": "8000",
+    "portal_port": "8001",
+    "opcua_port": "4840",
+    "mqtt_broker_port": "1883",
+}
 
-def run(cmd):
+
+def run(cmd: list[str]) -> None:
     try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW, timeout=15)
+        subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW,
+            timeout=15,
+        )
     except Exception:
         pass
 
-def stop_pid(pid):
+
+def stop_pid(pid: str | int) -> None:
     if os.name == "nt":
         run(["taskkill.exe", "/PID", str(pid), "/F"])
 
-time.sleep(1.0)
 
-def load_ports():
-    p = dict(DEFAULT_PORTS)
-    if PORTS_JSON.exists():
-        try:
-            p.update({k:str(v) for k,v in json.loads(PORTS_JSON.read_text(encoding="utf-8")).items() if k in p})
-        except Exception:
-            pass
-    return p
+def load_ports() -> dict[str, str]:
+    ports = dict(DEFAULT_PORTS)
+    if not PORTS_JSON.exists():
+        return ports
+    try:
+        saved = json.loads(PORTS_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return ports
+    for key in ports:
+        value = str(saved.get(key, "")).strip()
+        if value:
+            ports[key] = value
+    return ports
+
+
+time.sleep(1.0)
 
 if PIDS_JSON.exists():
     try:
@@ -45,13 +67,18 @@ if PIDS_JSON.exists():
 if os.name == "nt":
     targets = set(load_ports().values())
     try:
-        out = subprocess.check_output(["netstat.exe", "-ano"], text=True, creationflags=CREATE_NO_WINDOW, timeout=15)
+        out = subprocess.check_output(
+            ["netstat.exe", "-ano"],
+            text=True,
+            creationflags=CREATE_NO_WINDOW,
+            timeout=15,
+        )
         for line in out.splitlines():
             parts = line.split()
-            if len(parts) >= 5 and parts[0].upper().startswith("TCP") and parts[-2].upper() == "LISTENING":
-                local = parts[1]
-                pid = parts[-1]
-                if ":" in local and local.rsplit(":", 1)[-1] in targets:
-                    stop_pid(pid)
+            if len(parts) < 5 or not parts[0].upper().startswith("TCP") or parts[-2].upper() != "LISTENING":
+                continue
+            local = parts[1]
+            if ":" in local and local.rsplit(":", 1)[-1] in targets:
+                stop_pid(parts[-1])
     except Exception:
         pass
