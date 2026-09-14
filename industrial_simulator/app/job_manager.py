@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 import uuid
@@ -13,6 +14,7 @@ from app.models import JobRecord, JobType, utc_now_iso
 STATE_DIR = csv_manager.ROOT / "runtime_state"
 JOBS_PATH = STATE_DIR / "jobs.json"
 
+log = logging.getLogger("industrial.jobs")
 _lock = threading.RLock()
 _jobs: dict[str, JobRecord] = {}
 
@@ -22,11 +24,11 @@ def _load() -> None:
         return
     try:
         data = json.loads(JOBS_PATH.read_text(encoding="utf-8"))
-        for item in data:
-            record = JobRecord(**item)
-            _jobs[record.job_id] = record
-    except Exception:
-        _jobs.clear()
+        loaded = {record.job_id: record for record in (JobRecord(**item) for item in data)}
+    except Exception as exc:
+        log.exception("Could not load job state from %s.", JOBS_PATH)
+        raise RuntimeError(f"Could not load job state from {JOBS_PATH}: {exc}") from exc
+    _jobs.update(loaded)
 
 
 def _save() -> None:
