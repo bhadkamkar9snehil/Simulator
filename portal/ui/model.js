@@ -28,6 +28,18 @@ export function defaultOpcUaTarget(opcuaPort = 4840) {
       path: "simulator",
       namespace_uri: "http://local/unified-simulator",
       root_folder: "Simulations",
+      group_folder: "{simulation_id}.{target_id}",
+      node_id_prefix: "",
+      server_name: "Industrial Simulator OPC UA",
+      application_uri: "urn:local:industrial-simulator:opcua",
+      security_policy: "none",
+      authentication: "anonymous",
+      username: "",
+      password: "",
+      certificate_path: "",
+      private_key_path: "",
+      writable_signals: "",
+      data_type_overrides: "",
     },
   };
 }
