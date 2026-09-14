@@ -293,10 +293,12 @@ input:disabled, select:disabled, textarea:disabled { background: #f2f4f7; color:
 .form-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 13px 12px; }
 .field { display: grid; gap: 6px; min-width: 0; }
 .field.span-12 { grid-column: span 12; }
+.field.span-9 { grid-column: span 9; }
 .field.span-8 { grid-column: span 8; }
 .field.span-6 { grid-column: span 6; }
 .field.span-4 { grid-column: span 4; }
 .field.span-3 { grid-column: span 3; }
+.field.span-2 { grid-column: span 2; }
 .field label, .field-label { color: var(--text); font-size: 11px; font-weight: 700; }
 .field .help { color: var(--muted); font-size: 10.5px; line-height: 1.45; }
 .field .error { color: var(--danger); font-size: 10.5px; }
@@ -306,6 +308,7 @@ input:disabled, select:disabled, textarea:disabled { background: #f2f4f7; color:
 .checkbox-line label { cursor: pointer; }
 .form-divider { grid-column: 1 / -1; height: 1px; background: var(--line); margin: 2px 0; }
 .subsection-title { grid-column: 1 / -1; color: var(--ink); font-size: 12px; font-weight: 800; margin-top: 3px; }
+.api-template { min-height: 140px; }
 
 .segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(90px, auto); border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; background: #fff; }
 .segmented button { min-height: 32px; border: 0; border-right: 1px solid var(--line); padding: 0 12px; background: #fff; color: var(--muted); font-size: 11.5px; font-weight: 700; cursor: pointer; }
