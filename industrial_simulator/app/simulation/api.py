@@ -35,6 +35,20 @@ def _read(action: Callable[..., T], *args: Any) -> T:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _interface_runtime_status() -> dict[str, Any]:
+    result = simulation_manager.interface_status()
+    simulation_states = {
+        item.simulation_id: item.state
+        for item in simulation_manager.list_status()
+    }
+    for host in result.get("shared_opcua_hosts", {}).values():
+        for member in host.get("simulation_targets", []):
+            member["simulation_state"] = simulation_states.get(member.get("simulation_id"), "unknown")
+    for host in result.get("dedicated_opcua_hosts", {}).values():
+        host["simulation_state"] = simulation_states.get(host.get("simulation_id"), "unknown")
+    return result
+
+
 @router.get("/capabilities")
 def capabilities() -> dict[str, Any]:
     return {
@@ -74,7 +88,7 @@ def runtime_snapshot() -> dict[str, Any]:
 @router.get("/interfaces")
 def interface_status() -> dict[str, Any]:
     return {
-        **simulation_manager.interface_status(),
+        **_interface_runtime_status(),
         "api_routes": api_registry.endpoints(),
     }
 
