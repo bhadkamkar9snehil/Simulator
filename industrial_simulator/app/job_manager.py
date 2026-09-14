@@ -106,10 +106,6 @@ def resume_job(job_id: str) -> JobRecord:
     return update_job(job_id, state="queued", message="Resume requested.")
 
 
-def cleanup_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="cleanup_required", message="Cleanup requested.")
-
-
 def run_background(job_id: str, target: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
     def runner() -> None:
         try:
