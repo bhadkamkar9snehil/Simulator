@@ -4,12 +4,11 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.opcua_types import SCALAR_TYPES
+
 DataType = str
-OPCUA_DATA_TYPES = {
-    "Boolean", "SByte", "Byte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
-    "Float", "Double", "String", "DateTime", "Guid", "ByteString", "XmlElement", "NodeId",
-    "QualifiedName", "LocalizedText", "StatusCode",
-}
+# Compatibility export only; the canonical registry lives in app.opcua_types.
+OPCUA_DATA_TYPES = SCALAR_TYPES
 LoopMode = Literal["loop_forever", "once", "hold_last", "ping_pong"]
 TimestampMode = Literal["wall_clock", "csv_timestamp_ignore_rate", "relative_from_csv"]
 SimulatorState = Literal["idle", "configured", "running", "stopped", "completed", "error"]
