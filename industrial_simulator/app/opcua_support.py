@@ -23,6 +23,19 @@ SECURITY_POLICIES = {
     "none_and_basic256sha256",
 }
 AUTHENTICATION_MODES = {"anonymous", "username", "anonymous_or_username"}
+OPCUA_DATA_TYPES = {
+    "Double",
+    "Float",
+    "Int64",
+    "Int32",
+    "Int16",
+    "UInt64",
+    "UInt32",
+    "UInt16",
+    "Boolean",
+    "String",
+    "DateTime",
+}
 
 
 def normalize_server_options(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -82,6 +95,43 @@ def server_options_match(left: dict[str, Any], right: dict[str, Any]) -> list[st
         if left.get(key) != right.get(key):
             mismatches.append("credentials" if key == "password" else key)
     return sorted(set(mismatches))
+
+
+def parse_writable_signals(value: Any, available: set[str]) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, list):
+        names = {str(item).strip() for item in value if str(item).strip()}
+    else:
+        names = {item.strip() for item in str(value).replace("\n", ",").split(",") if item.strip()}
+    unknown = sorted(names - available)
+    if unknown:
+        raise ValueError(f"Unknown OPC UA writable signal: {unknown[0]}")
+    return names
+
+
+def parse_type_overrides(value: Any, available: set[str]) -> dict[str, str]:
+    if value in (None, ""):
+        return {}
+    if isinstance(value, dict):
+        raw = {str(key).strip(): str(item).strip() for key, item in value.items()}
+    else:
+        raw: dict[str, str] = {}
+        for line in str(value).splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            name, separator, data_type = line.partition("=")
+            if not separator:
+                raise ValueError(f"OPC UA type override must use Signal=Type: {line}")
+            raw[name.strip()] = data_type.strip()
+    unknown = sorted(set(raw) - available)
+    if unknown:
+        raise ValueError(f"Unknown OPC UA type override signal: {unknown[0]}")
+    invalid = sorted({data_type for data_type in raw.values() if data_type not in OPCUA_DATA_TYPES})
+    if invalid:
+        raise ValueError(f"Unsupported OPC UA data type: {invalid[0]}")
+    return raw
 
 
 def security_policy_types(policy: str) -> list[Any]:
