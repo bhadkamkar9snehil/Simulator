@@ -78,51 +78,55 @@ def test_data_value_carries_explicit_variant_status_and_timestamp() -> None:
     assert dv.SourceTimestamp == dt.datetime(2026, 9, 14, 12, 0, tzinfo=dt.timezone.utc)
 
 
-@pytest.mark.asyncio
-async def test_mock_server_preserves_configured_type_quality_timestamp_and_null() -> None:
-    server = OpcUaTagServer()
-    server.mock_mode = True
-    server.running = True
-    config = ReplayConfig(
-        protocol="opcua",
-        tags=[
-            TagMapping(csv_column="a", tag_name="A", node_id="sim.a", data_type="UInt16[]", quality="Good"),
-            TagMapping(csv_column="b", tag_name="B", node_id="sim.b", data_type="Int32"),
-        ],
-    )
-    await server.configure_tags(config)
-    await server.update_values({
-        "sim.a": ("[1,2,65535]", "UInt16[]", "Uncertain", "2026-09-14T12:00:00Z"),
-        "sim.b": (None, "Int32", "BadNoData", None),
-    })
-    assert server.variables["sim.a"]["value"] == [1, 2, 65535]
-    assert server.variables["sim.a"]["quality"] == "Uncertain"
-    assert server.variables["sim.b"]["value"] is None
-    assert server.variables["sim.b"]["quality"] == "BadNoData"
+def test_mock_server_preserves_configured_type_quality_timestamp_and_null() -> None:
+    async def scenario() -> None:
+        server = OpcUaTagServer()
+        server.mock_mode = True
+        server.running = True
+        config = ReplayConfig(
+            protocol="opcua",
+            tags=[
+                TagMapping(csv_column="a", tag_name="A", node_id="sim.a", data_type="UInt16[]", quality="Good"),
+                TagMapping(csv_column="b", tag_name="B", node_id="sim.b", data_type="Int32"),
+            ],
+        )
+        await server.configure_tags(config)
+        await server.update_values({
+            "sim.a": ("[1,2,65535]", "UInt16[]", "Uncertain", "2026-09-14T12:00:00Z"),
+            "sim.b": (None, "Int32", "BadNoData", None),
+        })
+        assert server.variables["sim.a"]["value"] == [1, 2, 65535]
+        assert server.variables["sim.a"]["quality"] == "Uncertain"
+        assert server.variables["sim.b"]["value"] is None
+        assert server.variables["sim.b"]["quality"] == "BadNoData"
 
-    with pytest.raises(ValueError, match="Datatype change"):
-        await server.update_values({"sim.b": (1.5, "Double")})
+        with pytest.raises(ValueError, match="Datatype change"):
+            await server.update_values({"sim.b": (1.5, "Double")})
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_diagnostics_counts_only_external_reads_and_writes() -> None:
-    diagnostics = OpcUaDiagnostics(recent_limit=5)
-    read = SimpleNamespace(NodeId="ns=2;s=A")
-    write = SimpleNamespace(NodeId="ns=2;s=B", AttributeId=13)
-    good = SimpleNamespace(is_bad=lambda: False, name="Good")
-    bad = SimpleNamespace(is_bad=lambda: True, name="BadTypeMismatch")
+def test_diagnostics_counts_only_external_reads_and_writes() -> None:
+    async def scenario() -> None:
+        diagnostics = OpcUaDiagnostics(recent_limit=5)
+        read = SimpleNamespace(NodeId="ns=2;s=A")
+        write = SimpleNamespace(NodeId="ns=2;s=B", AttributeId=13)
+        good = SimpleNamespace(is_bad=lambda: False, name="Good")
+        bad = SimpleNamespace(is_bad=lambda: True, name="BadTypeMismatch")
 
-    await diagnostics.on_post_read(SimpleNamespace(is_external=False, request_params=SimpleNamespace(NodesToRead=[read])))
-    await diagnostics.on_post_read(SimpleNamespace(is_external=True, request_params=SimpleNamespace(NodesToRead=[read, read])))
-    await diagnostics.on_post_write(SimpleNamespace(is_external=True, request_params=SimpleNamespace(NodesToWrite=[write, write]), response_params=[good, bad]))
+        await diagnostics.on_post_read(SimpleNamespace(is_external=False, request_params=SimpleNamespace(NodesToRead=[read])))
+        await diagnostics.on_post_read(SimpleNamespace(is_external=True, request_params=SimpleNamespace(NodesToRead=[read, read])))
+        await diagnostics.on_post_write(SimpleNamespace(is_external=True, request_params=SimpleNamespace(NodesToWrite=[write, write]), response_params=[good, bad]))
 
-    snapshot = diagnostics.snapshot(None)
-    assert snapshot["read_requests"] == 1
-    assert snapshot["read_nodes"] == 2
-    assert snapshot["write_requests"] == 1
-    assert snapshot["write_nodes"] == 2
-    assert snapshot["failed_writes"] == 1
-    assert [entry["kind"] for entry in snapshot["recent_activity"]] == ["write", "read"]
+        snapshot = diagnostics.snapshot(None)
+        assert snapshot["read_requests"] == 1
+        assert snapshot["read_nodes"] == 2
+        assert snapshot["write_requests"] == 1
+        assert snapshot["write_nodes"] == 2
+        assert snapshot["failed_writes"] == 1
+        assert [entry["kind"] for entry in snapshot["recent_activity"]] == ["write", "read"]
+
+    asyncio.run(scenario())
 
 
 def test_diagnostics_session_snapshot_uses_asyncua_external_session_registry_shape() -> None:
