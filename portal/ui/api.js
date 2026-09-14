@@ -46,6 +46,9 @@ export const simulatorApi = {
   pauseSimulation: (id) => request(`/api/v2/simulations/${encodeURIComponent(id)}/pause`, { method: "POST" }),
   resumeSimulation: (id) => request(`/api/v2/simulations/${encodeURIComponent(id)}/resume`, { method: "POST" }),
   stopSimulation: (id) => request(`/api/v2/simulations/${encodeURIComponent(id)}/stop`, { method: "POST" }),
+  restartSimulation: (id) => request(`/api/v2/simulations/${encodeURIComponent(id)}/restart`, { method: "POST" }),
+  resetCursor: (id) => request(`/api/v2/simulations/${encodeURIComponent(id)}/reset-cursor`, { method: "POST" }),
+  seekSimulation: (id, position) => request(`/api/v2/simulations/${encodeURIComponent(id)}/seek?position=${encodeURIComponent(position)}`, { method: "POST" }),
   snapshot: (id) => request(`/api/v2/simulations/${encodeURIComponent(id)}/snapshot`),
 
   files: () => request("/api/csv/files"),
