@@ -20,6 +20,7 @@ class OpcUaHandle:
     server: OpcUaTagServer
     node_map: dict[str, str]
     shared: bool
+    port: int
 
 
 @dataclass
@@ -49,12 +50,7 @@ class _SharedOpcUaHost:
 
 
 class InterfaceHostManager:
-    """Own interface listeners whose lifecycle outlives one simulation target.
-
-    Shared OPC UA hosts stay alive while simulations are added or removed. Each
-    target gets a child folder under the configured common root and can therefore
-    be removed without rebuilding or restarting unrelated simulations.
-    """
+    """Own interface listeners whose lifecycle outlives one simulation target."""
 
     def __init__(self) -> None:
         self._shared_opcua: dict[str, _SharedOpcUaHost] = {}
@@ -76,7 +72,8 @@ class InterfaceHostManager:
 
     async def release_opcua(self, handle: OpcUaHandle) -> None:
         if not handle.shared:
-            self._dedicated_opcua.pop(handle.member_key, None)
+            async with self._manager_lock:
+                self._dedicated_opcua.pop(handle.member_key, None)
             await handle.server.stop()
             return
 
@@ -158,6 +155,7 @@ class InterfaceHostManager:
                     "simulation_id": handle.simulation_id,
                     "target_id": handle.target_id,
                     "tag_count": len(handle.node_map),
+                    "port": handle.port,
                 }
                 for member_key, handle in self._dedicated_opcua.items()
             },
@@ -177,10 +175,20 @@ class InterfaceHostManager:
         advertised_host = str(config.get("advertised_host", "localhost")).strip() or "localhost"
         namespace_uri = str(config.get("namespace_uri", "http://local/unified-simulator"))
         root_folder = str(config.get("root_folder", "Simulations")).strip() or "Simulations"
-        key = _listener_key(bind_host, port, path)
+        key = _listener_key(bind_host, port)
         member_key = _member_key(simulation_id, binding.target_id)
 
         async with self._manager_lock:
+            if any(handle.port == port for handle in self._dedicated_opcua.values()):
+                raise ValueError(f"OPC UA port {port} is already reserved by a dedicated target.")
+            conflicting_shared = next(
+                (item for item in self._shared_opcua.values() if item.port == port and item.key != key),
+                None,
+            )
+            if conflicting_shared is not None:
+                raise ValueError(
+                    f"OPC UA port {port} is already reserved by shared listener {conflicting_shared.key}."
+                )
             host = self._shared_opcua.get(key)
             if host is None:
                 host = _SharedOpcUaHost(
@@ -198,7 +206,7 @@ class InterfaceHostManager:
                 )
                 self._shared_opcua[key] = host
 
-        _validate_shared_host(host, advertised_host, namespace_uri, root_folder)
+        _validate_shared_host(host, path, advertised_host, namespace_uri, root_folder)
 
         try:
             async with host.lock:
@@ -222,7 +230,7 @@ class InterfaceHostManager:
                 await host.server.stop()
             raise
 
-        return OpcUaHandle(key, member_key, binding.target_id, simulation_id, host.server, node_map, True)
+        return OpcUaHandle(key, member_key, binding.target_id, simulation_id, host.server, node_map, True, port)
 
     async def _acquire_dedicated(
         self,
@@ -239,24 +247,39 @@ class InterfaceHostManager:
         path = str(config.get("path", safe_name(simulation_id))).strip("/") or safe_name(simulation_id)
         advertised_host = str(config.get("advertised_host", "localhost")).strip() or "localhost"
         member_key = _member_key(simulation_id, binding.target_id)
-        if member_key in self._dedicated_opcua:
-            raise ValueError(f"Dedicated OPC UA target already exists: {member_key}")
+        key = _listener_key(bind_host, port)
         server = OpcUaTagServer(
             endpoint=f"opc.tcp://{bind_host}:{port}/{path}",
             advertised_endpoint=f"opc.tcp://{advertised_host}:{port}/{path}",
         )
         node_map = {signal.name: signal.node_id for signal in schema}
-        await server.start()
-        await server.configure_tags(
-            _opcua_config(
-                schema,
-                node_map,
-                str(config.get("namespace_uri", f"http://local/unified-simulator/{simulation_id}")),
-                str(config.get("root_folder", safe_name(simulation_name))),
+        handle = OpcUaHandle(key, member_key, binding.target_id, simulation_id, server, node_map, False, port)
+
+        async with self._manager_lock:
+            if member_key in self._dedicated_opcua:
+                raise ValueError(f"Dedicated OPC UA target already exists: {member_key}")
+            if any(host.port == port for host in self._shared_opcua.values()):
+                raise ValueError(f"OPC UA port {port} is already reserved by a shared listener.")
+            if any(existing.port == port for existing in self._dedicated_opcua.values()):
+                raise ValueError(f"OPC UA port {port} is already reserved by another dedicated target.")
+            self._dedicated_opcua[member_key] = handle
+
+        try:
+            await server.start()
+            await server.configure_tags(
+                _opcua_config(
+                    schema,
+                    node_map,
+                    str(config.get("namespace_uri", f"http://local/unified-simulator/{simulation_id}")),
+                    str(config.get("root_folder", safe_name(simulation_name))),
+                )
             )
-        )
-        handle = OpcUaHandle(binding.target_id, member_key, binding.target_id, simulation_id, server, node_map, False)
-        self._dedicated_opcua[member_key] = handle
+        except Exception:
+            async with self._manager_lock:
+                if self._dedicated_opcua.get(member_key) is handle:
+                    self._dedicated_opcua.pop(member_key, None)
+            await server.stop()
+            raise
         return handle
 
 
@@ -315,8 +338,8 @@ class OpcUaTarget:
         )
 
 
-def _listener_key(bind_host: str, port: int, path: str) -> str:
-    return f"{bind_host}:{port}/{path}"
+def _listener_key(bind_host: str, port: int) -> str:
+    return f"{bind_host}:{port}"
 
 
 def _member_key(simulation_id: str, target_id: str) -> str:
@@ -325,11 +348,14 @@ def _member_key(simulation_id: str, target_id: str) -> str:
 
 def _validate_shared_host(
     host: _SharedOpcUaHost,
+    path: str,
     advertised_host: str,
     namespace_uri: str,
     root_folder: str,
 ) -> None:
     mismatches: list[str] = []
+    if host.path != path:
+        mismatches.append(f"path={host.path!r}")
     if host.advertised_host != advertised_host:
         mismatches.append(f"advertised_host={host.advertised_host!r}")
     if host.namespace_uri != namespace_uri:
