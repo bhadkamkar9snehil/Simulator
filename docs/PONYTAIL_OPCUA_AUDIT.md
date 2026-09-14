@@ -20,12 +20,12 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 | P0-03 | P0 | FIXED | `DataType = str` weakened validation outside `TagMapping` | Unified `SignalValue`, `SignalDefinition`, and `SignalMapping` now validate scalar/array datatypes against the canonical registry at construction. |
 | P0-04 | P0 | FIXED | `type_inference.convert_value()` was an independent execution-time conversion path | Compatibility callers may still use the function, but it delegates all coercion semantics to `opcua_types.py`; type inference owns inference only. |
 | P0-05 | P0 | FIXED | StatusCode semantics differed between legacy and unified runtimes | Both surfaces now delegate to the canonical StatusCode conversion; tests cover exact named/numeric values and invalid-name rejection. |
-| P1-01 | P1 | IN PROGRESS | `quality_column` and `source_timestamp_column` are configuration without complete replay behavior | Wire both through replay or remove them. |
-| P1-02 | P1 | OPEN | Diagnostics UI creates a second `/api/status` polling loop | One status poll feeds all renderers. |
-| P1-03 | P1 | OPEN | Diagnostics JS dynamically manufactures markup and CSS | Static markup/styles; diagnostics module renders data only. |
-| P1-04 | P1 | OPEN | Rich diagnostics are attached to the legacy UI/status surface rather than unified interface-host view | Unified `/api/v2/interfaces` and Portal host UI become the canonical diagnostics surface. |
-| P1-05 | P1 | OPEN | Session diagnostics depend on asyncua private fields without explicit capability reporting | Keep introspection isolated and expose availability/degradation explicitly. |
-| P2-01 | P2 | OPEN | OPC UA datatype constants are duplicated across modules | One canonical datatype registry. |
+| P1-01 | P1 | FIXED | `quality_column` and `source_timestamp_column` were configuration without complete replay behavior | Replay now validates and emits configured quality/source-timestamp columns to OPC UA while preserving MQTT compatibility. |
+| P1-02 | P1 | FIXED | Diagnostics UI created a second `/api/status` polling loop | Diagnostics renders from the main status payload; no independent network polling remains. |
+| P1-03 | P1 | FIXED | Diagnostics JS dynamically manufactured markup and CSS | Diagnostics markup is static HTML, presentation is static CSS, and JS is render-only. |
+| P1-04 | P1 | FIXED | Rich diagnostics were attached only to the legacy UI/status surface | Unified `/api/v2/interfaces` host cards now render diagnostics for shared and dedicated OPC UA listeners. |
+| P1-05 | P1 | FIXED | Session diagnostics depended on asyncua private fields without explicit capability reporting | Private introspection remains isolated and snapshots explicitly report session/subscription introspection availability. |
+| P2-01 | P2 | IN PROGRESS | OPC UA datatype constants are duplicated across modules | One canonical datatype registry. |
 | P2-02 | P2 | OPEN | Initial `None` cannot distinguish unspecified value from explicit typed null | Define explicit initial-null semantics without adding redundant switches. |
 | P2-03 | P2 | OPEN | Legacy server silently enters mock mode when asyncua is unavailable | Production paths fail clearly; mocks remain explicit test behavior. |
 
@@ -79,3 +79,33 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 - Added parity tests proving the support/unified compatibility surface and canonical layer resolve the same named StatusCodes.
 - Added exact numeric/hex StatusCode preservation tests.
 - Added regression tests proving unknown status names raise rather than becoming Good.
+
+### P1-01 — make replay metadata real — `66d5f19`, `a28dd11`, `0359518`
+
+- Replay now validates configured quality/source-timestamp columns with the value column.
+- Replay payloads carry value, datatype, quality and source timestamp into OPC UA.
+- The dual-protocol adapter deliberately strips enriched tuples back to value/datatype for MQTT while retaining MQTT metadata.
+- Added focused regression coverage proving configured metadata reaches the publisher.
+
+### P1-02 — one status poll — `e0519e7`
+
+- Removed the diagnostics module's independent `/api/status` fetch and timer.
+- Diagnostics now renders whenever the main raw status payload changes.
+
+### P1-03 — static diagnostics UI — `15325f8`, `145e6a0`, `9a507f2`
+
+- Moved diagnostics cards/tables into `index.html`.
+- Moved diagnostics presentation into `opcua-diagnostics.css`.
+- Reduced `opcua-diagnostics.js` to data rendering and status observation.
+
+### P1-04 — canonical unified host diagnostics — `4117e33`
+
+- Added live diagnostics blocks to the Portal's shared and dedicated OPC UA host cards.
+- The canonical interface-host view now exposes clients, sessions, reads, writes, failures and recent activity from `/api/v2/interfaces`.
+
+### P1-05 — explicit private-introspection capability — `bcad0ec`, `935e653`
+
+- Kept all asyncua private session/subscription access inside `OpcUaDiagnostics`.
+- Added explicit session/subscription introspection capability flags.
+- Unavailable session internals now produce null client/session counts rather than misleading zeros.
+- Added focused degradation tests.
