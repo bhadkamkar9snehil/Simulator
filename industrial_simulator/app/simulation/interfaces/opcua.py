@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.models import ReplayConfig
-from app.opcua_server import OpcUaTagServer, ua
+from app.opcua_server import OpcUaTagServer, Server, ua
 
 from ..models import SignalDefinition, SimulationFrame, TargetBinding, TargetRuntimeStatus
 from .common import safe_name, tag_mapping
@@ -68,6 +68,8 @@ class InterfaceHostManager:
         binding: TargetBinding,
         schema: list[SignalDefinition],
     ) -> OpcUaHandle:
+        if Server is None:
+            raise RuntimeError("OPC UA target is unavailable because asyncua could not be imported.")
         if binding.hosting_mode == "dedicated":
             return await self._acquire_dedicated(simulation_id, simulation_name, binding, schema)
         return await self._acquire_shared(simulation_id, simulation_name, binding, schema)
