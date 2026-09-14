@@ -94,18 +94,6 @@ def mark_failed(job_id: str, error: str, **fields: Any) -> JobRecord:
     return update_job(job_id, **payload)
 
 
-def cancel_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="cancelled", completed_at=utc_now_iso(), message="Cancellation requested.")
-
-
-def pause_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="paused", message="Pause requested.")
-
-
-def resume_job(job_id: str) -> JobRecord:
-    return update_job(job_id, state="queued", message="Resume requested.")
-
-
 def run_background(job_id: str, target: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
     def runner() -> None:
         try:
