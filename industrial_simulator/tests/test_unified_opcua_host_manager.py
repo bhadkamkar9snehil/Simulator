@@ -62,6 +62,8 @@ class _FakeOpcUaServer:
                 "value": signal.initial_value,
                 "data_type": data_types[signal.name],
                 "writable": signal.name in writable_signals,
+                "quality": "GOOD",
+                "source_timestamp": None,
             }
 
     async def update_values(self, values) -> None:
@@ -69,6 +71,14 @@ class _FakeOpcUaServer:
             if node_id in self.variables:
                 self.variables[node_id]["value"] = value
                 self.variables[node_id]["data_type"] = data_type
+
+    async def update_signals(self, values) -> None:
+        for node_id, (value, data_type, quality, source_timestamp) in values.items():
+            if node_id in self.variables:
+                self.variables[node_id]["value"] = value
+                self.variables[node_id]["data_type"] = data_type
+                self.variables[node_id]["quality"] = quality
+                self.variables[node_id]["source_timestamp"] = source_timestamp
 
     def get_status(self) -> dict:
         return {
@@ -152,10 +162,14 @@ def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) 
             first,
             SimulationFrame(
                 simulation_id="sim-a",
-                values={"pressure": SignalValue(value=12.5, data_type="Double")},
+                source_timestamp="2026-09-14T10:00:00Z",
+                values={"pressure": SignalValue(value=12.5, data_type="Double", quality="UNCERTAIN")},
             ),
         )
-        assert first.server.variables[first.node_map["pressure"]]["value"] == 12.5
+        variable = first.server.variables[first.node_map["pressure"]]
+        assert variable["value"] == 12.5
+        assert variable["quality"] == "UNCERTAIN"
+        assert variable["source_timestamp"] == "2026-09-14T10:00:00Z"
 
         await manager.release_opcua(first)
         assert first.server.running is True
