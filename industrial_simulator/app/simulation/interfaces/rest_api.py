@@ -58,6 +58,20 @@ def _parse_headers(value: Any) -> dict[str, str]:
     return headers
 
 
+def _parse_required_values(value: Any) -> list[tuple[str, str | None]]:
+    items: list[tuple[str, str | None]] = []
+    for line in str(value or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        path, separator, expected = line.partition("=")
+        path = path.strip()
+        if not path.startswith(("path.", "query.", "body.")):
+            raise ValueError(f"Required request value must start with path., query., or body.: {path}")
+        items.append((path, expected.strip() if separator else None))
+    return items
+
+
 def _parse_template(value: Any) -> Any:
     if value in (None, ""):
         return {}
@@ -110,11 +124,12 @@ def _choice(config: dict[str, Any], key: str, default: str, allowed: set[str], l
     return value
 
 
-def _status_codes(config: dict[str, Any]) -> tuple[int, int, int]:
+def _status_codes(config: dict[str, Any]) -> tuple[int, int, int, int]:
     codes = (
         int(config.get("status_code", 200)),
         int(config.get("empty_status_code", 503)),
         int(config.get("not_found_status", 404)),
+        int(config.get("request_error_status", 400)),
     )
     if any(not 100 <= code <= 599 for code in codes):
         raise ValueError("API status codes must be between 100 and 599.")
@@ -139,7 +154,7 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
     selection_mode = _choice(config, "selection_mode", "current", _SELECTION_MODES, "selection mode")
     body_mode = _choice(config, "body_mode", "json", _BODY_MODES, "body mode")
     history_order = _choice(config, "history_order", "oldest_first", _HISTORY_ORDERS, "history order")
-    status_code, empty_status_code, not_found_status = _status_codes(config)
+    status_code, empty_status_code, not_found_status, request_error_status = _status_codes(config)
     delay_ms = _bounded_int(config, "delay_ms", 0, 0, 300_000)
     delay_jitter_ms = _bounded_int(config, "delay_jitter_ms", 0, 0, 300_000)
     history_size = _bounded_int(config, "history_size", 100, 1, 100_000)
@@ -163,6 +178,7 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
         "status_code": status_code,
         "empty_status_code": empty_status_code,
         "not_found_status": not_found_status,
+        "request_error_status": request_error_status,
         "delay_ms": delay_ms,
         "delay_jitter_ms": delay_jitter_ms,
         "history_size": history_size,
@@ -175,6 +191,7 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
         "include_system_fields": bool(config.get("include_system_fields", True)),
         "response_headers": _parse_headers(config.get("response_headers")),
         "required_headers": _parse_headers(config.get("required_headers")),
+        "required_request_values": _parse_required_values(config.get("required_request_values")),
         "response_template": _parse_template(config.get("response_template")),
         "text_template": str(config.get("text_template", "")),
         "match_frame": match_frame,
@@ -195,6 +212,7 @@ class ApiProjection:
     status_code: int
     empty_status_code: int
     not_found_status: int
+    request_error_status: int
     delay_ms: int
     delay_jitter_ms: int
     fields: list[str]
@@ -203,6 +221,7 @@ class ApiProjection:
     include_system_fields: bool
     response_headers: dict[str, str]
     required_headers: dict[str, str]
+    required_request_values: list[tuple[str, str | None]]
     response_template: Any
     text_template: str
     history_size: int
@@ -471,8 +490,13 @@ def _query_int(query: dict[str, str], name: str, default: int, minimum: int, max
     return value
 
 
-def _json_payload(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> Any:
-    frame = _selected_frame(projection, path_params, query, body)
+def _json_payload(
+    projection: ApiProjection,
+    frame: SimulationFrame | None,
+    path_params: dict[str, str],
+    query: dict[str, str],
+    body: Any,
+) -> Any:
     if projection.response_mode == "template":
         payload = _render_template(projection.response_template, _request_scope(frame, path_params, query, body))
     else:
@@ -495,12 +519,32 @@ def _template_uses_frame(value: str) -> bool:
     return any(f"${{{scope}." in value for scope in ("values", "context", "meta"))
 
 
-def _text_payload(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> str:
-    frame = _selected_frame(projection, path_params, query, body)
+def _text_payload(
+    projection: ApiProjection,
+    frame: SimulationFrame | None,
+    path_params: dict[str, str],
+    query: dict[str, str],
+    body: Any,
+) -> str:
     if frame is None and _template_uses_frame(projection.text_template):
         raise HTTPException(status_code=projection.empty_status_code, detail="Simulation has not published data yet.")
     rendered = _render_template(projection.text_template, _request_scope(frame, path_params, query, body))
     return "" if rendered is None else str(rendered)
+
+
+def _response_headers(
+    projection: ApiProjection,
+    frame: SimulationFrame | None,
+    path_params: dict[str, str],
+    query: dict[str, str],
+    body: Any,
+) -> dict[str, str]:
+    scope = _request_scope(frame, path_params, query, body)
+    headers: dict[str, str] = {}
+    for name, value in projection.response_headers.items():
+        rendered = _render_template(value, scope)
+        headers[name] = "" if rendered is None else str(rendered)
+    return headers
 
 
 def _bodyless_status(status_code: int) -> bool:
@@ -508,18 +552,19 @@ def _bodyless_status(status_code: int) -> bool:
 
 
 def _response(projection: ApiProjection, request_method: str, path_params: dict[str, str], query: dict[str, str], body: Any) -> Response:
-    headers = projection.response_headers
+    frame = _selected_frame(projection, path_params, query, body)
+    headers = _response_headers(projection, frame, path_params, query, body)
     if request_method == "HEAD" or projection.body_mode == "empty" or _bodyless_status(projection.status_code):
         return Response(status_code=projection.status_code, headers=headers)
     if projection.body_mode == "text":
         return Response(
-            content=_text_payload(projection, path_params, query, body),
+            content=_text_payload(projection, frame, path_params, query, body),
             status_code=projection.status_code,
             headers=headers,
             media_type=projection.media_type or "text/plain",
         )
     return JSONResponse(
-        content=_json_payload(projection, path_params, query, body),
+        content=_json_payload(projection, frame, path_params, query, body),
         status_code=projection.status_code,
         headers=headers,
         media_type=projection.media_type or "application/json",
@@ -529,6 +574,16 @@ def _response(projection: ApiProjection, request_method: str, path_params: dict[
 def _request_delay_seconds(projection: ApiProjection) -> float:
     jitter = random.uniform(0, projection.delay_jitter_ms) if projection.delay_jitter_ms else 0.0
     return (projection.delay_ms + jitter) / 1000.0
+
+
+def _require_request_values(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> None:
+    scope = _request_scope(None, path_params, query, body)
+    for path, expected in projection.required_request_values:
+        actual = _lookup(scope, path)
+        if actual is None:
+            raise HTTPException(status_code=projection.request_error_status, detail=f"Required request value missing: {path}")
+        if expected is not None and str(actual) != expected:
+            raise HTTPException(status_code=projection.request_error_status, detail=f"Required request value invalid: {path}")
 
 
 async def _dispatch(request: Request, request_path: str) -> Response:
@@ -541,9 +596,6 @@ async def _dispatch(request: Request, request_path: str) -> Response:
         for name, expected in projection.required_headers.items():
             if request.headers.get(name) != expected:
                 raise HTTPException(status_code=401, detail=f"Required request header missing or invalid: {name}")
-        delay = _request_delay_seconds(projection)
-        if delay:
-            await asyncio.sleep(delay)
         body: Any = None
         if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
             raw = await request.body()
@@ -552,7 +604,12 @@ async def _dispatch(request: Request, request_path: str) -> Response:
                     body = json.loads(raw)
                 except json.JSONDecodeError:
                     body = raw.decode("utf-8", errors="replace")
-        response = _response(projection, request.method.upper(), path_params, dict(request.query_params), body)
+        query = dict(request.query_params)
+        _require_request_values(projection, path_params, query, body)
+        delay = _request_delay_seconds(projection)
+        if delay:
+            await asyncio.sleep(delay)
+        response = _response(projection, request.method.upper(), path_params, query, body)
         status_code = response.status_code
         return response
     except HTTPException as exc:
