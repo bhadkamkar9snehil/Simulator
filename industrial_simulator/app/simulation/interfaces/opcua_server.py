@@ -3,12 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.opcua_server import (
-    OpcUaTagServer,
-    Server,
-    _patch_asyncua_python314_property_annotations,
-    ua,
-)
+from app.opcua_server import OpcUaTagServer, Server, ua
 from app.opcua_support import (
     FixtureUserManager,
     coerce_value,
@@ -27,11 +22,7 @@ from ..models import SignalDefinition, utc_now_iso
 
 
 class UnifiedOpcUaServer(OpcUaTagServer):
-    """Unified-runtime OPC UA server with explicit security and scalar types.
-
-    The legacy server remains intact while old replay callers are migrated. This
-    subclass is intentionally small and reuses its event-loop/certificate code.
-    """
+    """Unified-runtime OPC UA server with explicit security and scalar types."""
 
     def __init__(
         self,
@@ -51,10 +42,8 @@ class UnifiedOpcUaServer(OpcUaTagServer):
         if Server is None or ua is None:
             raise RuntimeError("asyncua is required for OPC UA simulation.")
 
-        _patch_asyncua_python314_property_annotations()
         self.server = Server(user_manager=FixtureUserManager(self.server_options))
         await self.server.init()
-        _patch_asyncua_python314_property_annotations()
         self.server.set_endpoint(self.endpoint)
         self.server.set_server_name(self.server_options["server_name"])
         if hasattr(self.server, "set_application_uri"):
@@ -78,7 +67,6 @@ class UnifiedOpcUaServer(OpcUaTagServer):
 
         self.idx = await self.server.register_namespace(self.namespace_uri)
         await self.server.start()
-        _patch_asyncua_python314_property_annotations()
         self.running = True
 
     def _security_files(self) -> tuple[Path, Path]:
@@ -175,7 +163,6 @@ class UnifiedOpcUaServer(OpcUaTagServer):
             if signal.name in writable_signals:
                 await var.set_writable()
             self.variables[node_id] = var
-        _patch_asyncua_python314_property_annotations()
 
     async def update_signals(
         self,
