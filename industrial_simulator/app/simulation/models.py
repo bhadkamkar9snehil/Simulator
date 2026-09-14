@@ -7,6 +7,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models import DataType
+from app.opcua_types import is_supported_type
 
 
 def utc_now_iso() -> str:
@@ -17,12 +18,26 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
+def _validated_data_type(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value or "String").strip()
+    if not is_supported_type(text):
+        raise ValueError(f"Unsupported OPC UA datatype: {value}")
+    return text
+
+
 class SignalValue(BaseModel):
     value: Any = None
     data_type: DataType = "String"
     quality: str = "GOOD"
     unit: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("data_type")
+    @classmethod
+    def validate_data_type(cls, value: str) -> str:
+        return _validated_data_type(value) or "String"
 
 
 class SignalDefinition(BaseModel):
@@ -32,6 +47,11 @@ class SignalDefinition(BaseModel):
     initial_value: Any = None
     unit: str | None = None
     writable: bool = False
+
+    @field_validator("data_type")
+    @classmethod
+    def validate_data_type(cls, value: str) -> str:
+        return _validated_data_type(value) or "String"
 
 
 class SignalMapping(BaseModel):
@@ -61,6 +81,11 @@ class SignalMapping(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+    @field_validator("data_type")
+    @classmethod
+    def validate_data_type(cls, value: str | None) -> str | None:
+        return _validated_data_type(value)
 
 
 class SimulationFrame(BaseModel):
