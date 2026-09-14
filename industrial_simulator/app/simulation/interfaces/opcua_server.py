@@ -141,7 +141,7 @@ class UnifiedOpcUaServer(OpcUaTagServer):
                 await var.write_value(typed, varianttype=variant_type(data_type))
 
     def get_status(self) -> dict[str, Any]:
-        return {
-            **super().get_status(),
-            **public_server_options(self.server_options),
-        }
+        base = super().get_status()
+        configured = public_server_options(self.server_options)
+        configured["certificate_path"] = configured["certificate_path"] or base.get("certificate_path")
+        return {**base, **configured}
