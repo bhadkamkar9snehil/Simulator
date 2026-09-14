@@ -49,29 +49,5 @@
     if (activity) activity.innerHTML = activityTable(diag.recent_activity || []);
   }
 
-  function renderRawStatus() {
-    const raw = document.getElementById('rawStatus');
-    if (!raw) return;
-    try {
-      renderStatus(JSON.parse(raw.textContent || '{}'));
-    } catch (_) {
-      // Main status renderer owns connectivity/parse errors.
-    }
-  }
-
-  function start() {
-    renderRawStatus();
-    const raw = document.getElementById('rawStatus');
-    if (!raw) return;
-    const observer = new MutationObserver(renderRawStatus);
-    observer.observe(raw, {childList: true, characterData: true, subtree: true});
-  }
-
   window.renderOpcUaDiagnostics = renderStatus;
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
-  } else {
-    start();
-  }
 })();
