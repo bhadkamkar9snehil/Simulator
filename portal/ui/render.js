@@ -21,6 +21,9 @@ const TABS = [
   ["mapping", "Signals & Mapping"],
   ["targets", "Targets"],
 ];
+const launcher = window.SIMULATOR_LAUNCHER_CONFIG || {};
+const industrialPort = Number(launcher.industrial_web_port || 8000);
+const industrialBase = `http://${location.hostname || "localhost"}:${industrialPort}`;
 
 function esc(value) {
   return String(value ?? "")
@@ -50,6 +53,11 @@ function percent(value) {
   return value == null ? "—" : `${value.toFixed(1)}%`;
 }
 
+function apiUrl(config = {}) {
+  const path = String(config.path || "/").replace(/^\/+/, "");
+  return `${industrialBase}/sim-api/${path}`;
+}
+
 function endpointFor(target) {
   if (!target) return "";
   const config = target.config || {};
@@ -60,14 +68,26 @@ function endpointFor(target) {
     return `opc.tcp://${host}:${port}/${path}`;
   }
   if (target.kind === "mqtt") return `${config.host || "localhost"}:${config.port || 1883}/${config.topic_prefix || ""}`;
-  if (target.kind === "api" || target.kind === "rest_api") {
-    const path = String(config.path || "/").replace(/^\/+/, "");
-    return `${String(config.method || "GET").toUpperCase()} /sim-api/${path}`;
-  }
+  if (target.kind === "api" || target.kind === "rest_api") return `${String(config.method || "GET").toUpperCase()} ${apiUrl(config)}`;
   if (target.kind === "sql_server") return `${config.server || "localhost"}:${config.port || 1433}/${config.database || ""}`;
   if (target.kind === "odata") return `/odata/simulations/{simulation}/${target.target_id}`;
   if (target.kind === "http") return `/api/v2/simulations/{simulation}/targets/${target.target_id}`;
   return target.target_id;
+}
+
+function curlForApi(config = {}) {
+  const method = String(config.method || "GET").toUpperCase();
+  const url = apiUrl(config).replace(/\{([^}]+)\}/g, "example-$1");
+  const parts = [`curl --globoff -X ${method} "${url}"`];
+  for (const line of String(config.required_headers || "").split(/\r?\n/)) {
+    const value = line.trim();
+    if (value && value.includes(":")) parts.push(`-H "${value.replaceAll('"', '\\"')}"`);
+  }
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    parts.push('-H "Content-Type: application/json"');
+    parts.push("-d '{}' ");
+  }
+  return parts.join(" ").trim();
 }
 
 export function renderRailSummary(simulations) {
@@ -410,7 +430,8 @@ function renderTargets({ definition, status, editable }) {
 
 function renderTarget(target, index, runtime, editable) {
   const primary = target.kind === "opcua";
-  const endpoint = runtime?.endpoint || endpointFor(target);
+  const apiTarget = target.kind === "api" || target.kind === "rest_api";
+  const endpoint = apiTarget ? endpointFor(target) : (runtime?.endpoint || endpointFor(target));
   return `<article class="target-card ${primary ? "primary-target" : ""}">
     <header class="target-card-head">
       <span class="target-kind-mark ${primary ? "opcua" : ""}">${primary ? "UA" : esc(target.kind.slice(0, 3).toUpperCase())}</span>
@@ -458,7 +479,8 @@ function renderSecondaryTarget(target, index, runtime, editable) {
 }
 
 function renderApiTarget(path, config, editable) {
-  const responseMode = config.response_mode || "record";
+  const responseTemplate = typeof config.response_template === "string" ? config.response_template : JSON.stringify(config.response_template || {}, null, 2);
+  const curl = curlForApi(config);
   return `
     <div class="subsection-title">Request</div>
     ${fieldSelect("Method", `${path}.config.method`, config.method || "GET", [["GET", "GET"], ["POST", "POST"], ["PUT", "PUT"], ["PATCH", "PATCH"], ["DELETE", "DELETE"], ["HEAD", "HEAD"]], "span-3", editable)}
@@ -466,8 +488,9 @@ function renderApiTarget(path, config, editable) {
     ${fieldNumber("Response delay (ms)", `${path}.config.delay_ms`, config.delay_ms ?? 0, "span-3", editable, "integer", "Simulate API latency.", 0, 300000)}
     ${fieldTextarea("Required request headers", `${path}.config.required_headers`, config.required_headers || "", "span-6", editable, "One per line as Header: value. Useful for simulating API keys or Authorization headers.")}
     ${fieldTextarea("Response headers", `${path}.config.response_headers`, config.response_headers || "", "span-6", editable, "One per line as Header: value.")}
+    <div class="field span-12"><span class="field-label">Request example</span><div class="endpoint-preview"><code>${esc(curl)}</code><button data-action="copy-endpoint" data-copy="${attr(curl)}">Copy cURL</button></div><span class="help">Path parameters are replaced with example values. Add query parameters or a request body as required by the software you are testing.</span></div>
     <div class="form-divider"></div><div class="subsection-title">Response</div>
-    ${fieldSelect("Response shape", `${path}.config.response_mode`, responseMode, [["record", "Flat live record"], ["values", "Live values only"], ["frame", "Full canonical frame"], ["history", "Retained history"], ["template", "Custom JSON template"]], "span-4", editable)}
+    ${fieldSelect("Response shape", `${path}.config.response_mode`, config.response_mode || "record", [["record", "Flat live record"], ["values", "Live values only"], ["frame", "Full canonical frame"], ["history", "Retained history"], ["template", "Custom JSON template"]], "span-4", editable)}
     ${fieldNumber("Success status", `${path}.config.status_code`, config.status_code ?? 200, "span-2", editable, "integer", "", 100, 599)}
     ${fieldNumber("No-data status", `${path}.config.empty_status_code`, config.empty_status_code ?? 503, "span-2", editable, "integer", "Returned before the first frame is published.", 100, 599)}
     ${fieldNumber("History rows", `${path}.config.history_size`, config.history_size ?? 100, "span-2", editable, "integer", "Used by History response shape.", 1, 100000)}
@@ -475,7 +498,7 @@ function renderApiTarget(path, config, editable) {
     ${fieldText("Fields", `${path}.config.fields`, Array.isArray(config.fields) ? config.fields.join(", ") : (config.fields || ""), "span-6", editable, "Optional comma-separated canonical signal names.")}
     <div class="field span-3"><span class="field-label">Include context</span><div class="checkbox-line"><input type="checkbox" data-bind="${path}.config.include_context" ${checked(config.include_context)} ${disabled(!editable)} /><label>Merge frame context into flat records</label></div></div>
     <div class="field span-3"><span class="field-label">System fields</span><div class="checkbox-line"><input type="checkbox" data-bind="${path}.config.include_system_fields" ${checked(config.include_system_fields !== false)} ${disabled(!editable)} /><label>Sequence, timestamps and simulation ID</label></div></div>
-    ${responseMode === "template" ? fieldTextarea("Custom JSON response", `${path}.config.response_template`, typeof config.response_template === "string" ? config.response_template : JSON.stringify(config.response_template || {}, null, 2), "span-12", editable, "Tokens: ${values.Tag}, ${context.Key}, ${path.id}, ${query.name}, ${body.field}, ${meta.sequence}. Exact-token values preserve their JSON type.", "mono") : ""}
+    ${fieldTextarea("Custom JSON response", `${path}.config.response_template`, responseTemplate, "span-12", editable, "Used when Response shape is Custom JSON template. Tokens: ${values.Tag}, ${context.Key}, ${path.id}, ${query.name}, ${body.field}, ${meta.sequence}. Exact-token values preserve their JSON type.", "mono api-template")}
     <div class="notice info" style="grid-column:1/-1"><strong>API target.</strong> The endpoint exists only while this simulation target is running. It always responds from this simulation's current mapped data; add another API target when you need another independent route.</div>`;
 }
 
@@ -491,16 +514,23 @@ function commonTargetFields(target, index, editable) {
 export function renderInterfaces(status) {
   const shared = Object.entries(status?.shared_opcua_hosts || {});
   const dedicated = Object.entries(status?.dedicated_opcua_hosts || {});
+  const apiRoutes = status?.api_routes || [];
   const cards = [
     ...shared.map(([key, host]) => hostCard("Shared OPC UA", key, host)),
     ...dedicated.map(([key, host]) => hostCard("Dedicated OPC UA", key, host)),
+    ...apiRoutes.map((route) => apiRouteCard(route)),
   ];
-  if (!cards.length) return `<div class="notice info">No OPC UA hosts are active. Hosts are created on demand when a simulation starts.</div>`;
+  if (!cards.length) return `<div class="notice info">No interface hosts or simulated API routes are active. They are created on demand when simulations start.</div>`;
   return `<div class="host-grid">${cards.join("")}</div>`;
 }
 
 function hostCard(type, key, host) {
   return `<article class="host-card"><h3>${esc(type)}</h3><p class="mono">${esc(host.endpoint || key)}</p><dl class="key-value"><dt>Running</dt><dd>${host.running ? "Yes" : "No"}</dd><dt>Simulations</dt><dd>${host.simulation_count ?? (host.simulation_id ? 1 : "—")}</dd><dt>Targets</dt><dd>${host.target_count ?? 1}</dd><dt>Tags</dt><dd>${host.tag_count ?? "—"}</dd><dt>Namespace</dt><dd>${esc(host.namespace_uri || "—")}</dd><dt>Root</dt><dd>${esc(host.root_folder || "—")}</dd></dl></article>`;
+}
+
+function apiRouteCard(route) {
+  const url = `${industrialBase}${route.path}`;
+  return `<article class="host-card"><h3>REST API</h3><p class="mono">${esc(route.method)} ${esc(url)}</p><dl class="key-value"><dt>Simulation</dt><dd class="mono">${esc(route.simulation_id)}</dd><dt>Target</dt><dd class="mono">${esc(route.target_id)}</dd><dt>Response</dt><dd>${esc(route.response_mode)}</dd><dt>Requests</dt><dd>${route.request_count || 0}</dd><dt>Last request</dt><dd>${esc(route.last_request_at || "—")}</dd></dl></article>`;
 }
 
 export function renderSources(resources) {
@@ -519,7 +549,8 @@ function renderTargetHealth(definition, status) {
   if (!targets.length) return `<div class="notice warning">No enabled targets.</div>`;
   return `<div class="table-shell"><table class="data-table target-status-table"><thead><tr><th>Target</th><th>State</th><th>Endpoint</th><th>Published</th><th>Queue</th><th>Dropped</th></tr></thead><tbody>${targets.map((target) => {
     const runtime = statusTarget(status, target.target_id);
-    return `<tr><td><strong>${esc(targetLabel(target.kind))}</strong><br><span class="muted mono">${esc(target.target_id)}</span></td><td><span class="target-state ${stateClass(runtime?.state)}">${esc(runtime?.state ? humanState(runtime.state) : "Configured")}</span></td><td class="endpoint-cell">${esc(runtime?.endpoint || endpointFor(target) || "—")}</td><td>${runtime?.published_frames || 0}</td><td>${runtime?.queue_depth || 0}</td><td>${runtime?.dropped_frames || 0}</td></tr>`;
+    const endpoint = target.kind === "api" || target.kind === "rest_api" ? endpointFor(target) : (runtime?.endpoint || endpointFor(target) || "—");
+    return `<tr><td><strong>${esc(targetLabel(target.kind))}</strong><br><span class="muted mono">${esc(target.target_id)}</span></td><td><span class="target-state ${stateClass(runtime?.state)}">${esc(runtime?.state ? humanState(runtime.state) : "Configured")}</span></td><td class="endpoint-cell">${esc(endpoint)}</td><td>${runtime?.published_frames || 0}</td><td>${runtime?.queue_depth || 0}</td><td>${runtime?.dropped_frames || 0}</td></tr>`;
   }).join("")}</tbody></table></div>`;
 }
 
