@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -67,6 +68,9 @@ class _TargetRunner:
         self.last_error: str | None = None
         self.dropped_frames = 0
         self.published_frames = 0
+        self.retry_count = 0
+        self.last_success_at: str | None = None
+        self.last_latency_ms: float | None = None
 
     async def start(self, simulation_id: str, simulation_name: str, schema: list[SignalDefinition]) -> None:
         self.simulation_id = simulation_id
@@ -77,6 +81,7 @@ class _TargetRunner:
             self.started = True
         except Exception as exc:
             self.last_error = str(exc)
+            self.retry_count += 1
             if self.binding.failure_policy == "stop_simulation":
                 raise
         self.task = asyncio.create_task(self._run(), name=f"target:{simulation_id}:{self.binding.target_id}")
@@ -118,6 +123,9 @@ class _TargetRunner:
         status.queue_depth = self.queue.qsize()
         status.dropped_frames = self.dropped_frames
         status.published_frames = self.published_frames
+        status.retry_count = self.retry_count
+        status.last_success_at = self.last_success_at
+        status.last_latency_ms = self.last_latency_ms
         if self.last_error:
             status.last_error = self.last_error
             if status.state == "running":
@@ -127,17 +135,21 @@ class _TargetRunner:
     async def _run(self) -> None:
         while True:
             frame = await self.queue.get()
+            started = time.perf_counter()
             try:
                 if not self.started:
                     await self.target.start(self.simulation_id, self.simulation_name, self.schema)
                     self.started = True
                 await self.target.publish(frame)
                 self.published_frames += 1
+                self.last_success_at = utc_now_iso()
+                self.last_latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
                 self.last_error = None
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self.last_error = str(exc)
+                self.retry_count += 1
                 await self._reset_target()
                 if self.binding.failure_policy == "stop_simulation":
                     self.on_fatal(self.binding.target_id, self.last_error)
