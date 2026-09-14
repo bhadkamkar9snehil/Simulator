@@ -25,9 +25,9 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 | P1-03 | P1 | FIXED | Diagnostics JS dynamically manufactured markup and CSS | Diagnostics markup is static HTML, presentation is static CSS, and JS is render-only. |
 | P1-04 | P1 | FIXED | Rich diagnostics were attached only to the legacy UI/status surface | Unified `/api/v2/interfaces` host cards now render diagnostics for shared and dedicated OPC UA listeners. |
 | P1-05 | P1 | FIXED | Session diagnostics depended on asyncua private fields without explicit capability reporting | Private introspection remains isolated and snapshots explicitly report session/subscription introspection availability. |
-| P2-01 | P2 | IN PROGRESS | OPC UA datatype constants are duplicated across modules | One canonical datatype registry. |
-| P2-02 | P2 | OPEN | Initial `None` cannot distinguish unspecified value from explicit typed null | Define explicit initial-null semantics without adding redundant switches. |
-| P2-03 | P2 | OPEN | Legacy server silently enters mock mode when asyncua is unavailable | Production paths fail clearly; mocks remain explicit test behavior. |
+| P2-01 | P2 | FIXED | OPC UA datatype constants were duplicated across modules | `models.py` now exports the canonical registry from `opcua_types.py` rather than maintaining another list. |
+| P2-02 | P2 | FIXED | Initial `None` could not distinguish unspecified value from explicit typed null | `model_fields_set` preserves omitted-vs-explicit intent with no new configuration switch; unified adaptation preserves that intent. |
+| P2-03 | P2 | FIXED | Legacy server silently entered mock mode when asyncua was unavailable | OPC UA startup now fails clearly when asyncua is unavailable; tests can still explicitly exercise mock internals without reporting a running network server. |
 
 ## Working rules
 
@@ -109,3 +109,45 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 - Added explicit session/subscription introspection capability flags.
 - Unavailable session internals now produce null client/session counts rather than misleading zeros.
 - Added focused degradation tests.
+
+### P2-01 — one datatype registry — `54c2830`
+
+- Removed the duplicate datatype literal set from `models.py`.
+- The compatibility export now points to `opcua_types.SCALAR_TYPES`.
+
+### P2-02 — explicit typed-null semantics — `2e7a312`, `af68077`, `b6a6be2`
+
+- Initial value selection now uses Pydantic's existing `model_fields_set` rather than testing `value is None`.
+- Omitted initial values still receive a deterministic type default.
+- Explicit `initial_value=None` remains a typed null.
+- Unified signal-to-tag adaptation preserves whether the initial value field was actually supplied.
+- Added regression coverage for both legacy and unified adapters.
+
+### P2-03 — no silent OPC UA mock startup — `4048075`, `5744380`
+
+- Removed the production behavior that reported OPC UA as running when `asyncua` could not be imported.
+- Startup now raises a clear dependency/runtime error and `diagnostics_available` remains false.
+- Added focused regression coverage for the missing-dependency path.
+
+## Final audit state
+
+All issues identified by the 2026-09-14 OPC UA Ponytail audit are resolved on this branch. The intended ownership after cleanup is:
+
+```text
+opcua_types.py
+  -> the only OPC UA datatype/coercion/quality implementation
+
+OpcUaTagServer
+  -> low-level OPC UA host mechanics, nodes, writes, diagnostics and server loop
+
+UnifiedOpcUaServer
+  -> security/auth specialization + unified-model adaptation only
+
+InterfaceHostManager
+  -> shared/dedicated listener lifecycle
+
+SimulationInstance / targets[]
+  -> canonical simulation ownership
+```
+
+The legacy replay API remains a compatibility surface, but new OPC UA host behavior is no longer implemented as a separate parallel type/node/update stack.
