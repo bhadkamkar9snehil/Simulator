@@ -7,6 +7,7 @@ from .http import HttpTarget
 from .memory import MemoryTarget
 from .mqtt import MqttTarget
 from .opcua import InterfaceHostManager, OpcUaTarget
+from .rest_api import RestApiTarget
 from .sql_server import SqlServerTarget
 
 
@@ -20,6 +21,8 @@ def create_target(binding: TargetBinding, hosts: InterfaceHostManager) -> Simula
         return SqlServerTarget(binding)
     if kind in {"odata", "sap_odata"}:
         return ODataTarget(binding)
+    if kind in {"api", "rest_api"}:
+        return RestApiTarget(binding)
     if kind in {"http", "http_stream"}:
         return HttpTarget(binding)
     if kind in {"memory", "internal"}:
