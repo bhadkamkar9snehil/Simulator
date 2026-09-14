@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar
 
-from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 
 from .models import SimulationDefinition, SimulationStatus, WorldDefinition
@@ -46,6 +46,7 @@ def capabilities() -> dict[str, Any]:
             "implemented": ["opcua", "mqtt", "http", "sql_server", "odata", "memory"],
             "planned": ["modbus_tcp", "kafka"],
         },
+        "controls": ["start", "pause", "resume", "stop", "restart", "reset_cursor", "seek"],
         "hosting_modes": ["shared", "dedicated"],
         "loop_modes": ["once", "loop_forever", "hold_last", "ping_pong"],
         "clock_modes": ["fixed_rate", "source_timestamp"],
@@ -123,6 +124,24 @@ async def resume_simulation(simulation_id: str) -> SimulationStatus:
 @router.post("/simulations/{simulation_id}/stop", response_model=SimulationStatus)
 async def stop_simulation(simulation_id: str) -> SimulationStatus:
     return await _call(simulation_manager.stop, simulation_id)
+
+
+@router.post("/simulations/{simulation_id}/restart", response_model=SimulationStatus)
+async def restart_simulation(simulation_id: str) -> SimulationStatus:
+    return await _call(simulation_manager.restart, simulation_id)
+
+
+@router.post("/simulations/{simulation_id}/reset-cursor", response_model=SimulationStatus)
+async def reset_simulation_cursor(simulation_id: str) -> SimulationStatus:
+    return await _call(simulation_manager.reset_cursor, simulation_id)
+
+
+@router.post("/simulations/{simulation_id}/seek", response_model=SimulationStatus)
+async def seek_simulation(
+    simulation_id: str,
+    position: int = Query(..., ge=0),
+) -> SimulationStatus:
+    return await _call(simulation_manager.seek, simulation_id, position)
 
 
 @router.get("/simulations/{simulation_id}/snapshot")
