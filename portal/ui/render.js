@@ -60,6 +60,10 @@ function endpointFor(target) {
     return `opc.tcp://${host}:${port}/${path}`;
   }
   if (target.kind === "mqtt") return `${config.host || "localhost"}:${config.port || 1883}/${config.topic_prefix || ""}`;
+  if (target.kind === "api" || target.kind === "rest_api") {
+    const path = String(config.path || "/").replace(/^\/+/, "");
+    return `${String(config.method || "GET").toUpperCase()} /sim-api/${path}`;
+  }
   if (target.kind === "sql_server") return `${config.server || "localhost"}:${config.port || 1433}/${config.database || ""}`;
   if (target.kind === "odata") return `/odata/simulations/{simulation}/${target.target_id}`;
   if (target.kind === "http") return `/api/v2/simulations/{simulation}/targets/${target.target_id}`;
@@ -391,9 +395,9 @@ function renderTargets({ definition, status, editable }) {
       ${!editable ? lockedNotice() : ""}
       <section class="panel">
         <div class="panel-head">
-          <div><h3>Targets</h3><p>OPC UA is the primary end-to-end interface; additional targets receive the same canonical frame independently.</p></div>
+          <div><h3>Targets</h3><p>OPC UA is the primary end-to-end interface; every additional target receives the same canonical frame independently.</p></div>
           <div class="panel-actions">
-            <select id="addTargetKind" ${disabled(!editable)}><option value="mqtt">MQTT</option><option value="http">HTTP</option><option value="sql_server">SQL Server</option><option value="odata">OData</option><option value="opcua">Another OPC UA</option></select>
+            <select id="addTargetKind" ${disabled(!editable)}><option value="api">REST API</option><option value="mqtt">MQTT</option><option value="http">HTTP Stream</option><option value="sql_server">SQL Server</option><option value="odata">OData</option><option value="opcua">Another OPC UA</option></select>
             <button class="button secondary" data-action="add-target" ${disabled(!editable)}>Add target</button>
           </div>
         </div>
@@ -442,11 +446,37 @@ function renderSecondaryTarget(target, index, runtime, editable) {
   const path = `targets.${index}`;
   const config = target.config || {};
   let specific = "";
+  if (target.kind === "api" || target.kind === "rest_api") specific = renderApiTarget(path, config, editable);
   if (target.kind === "mqtt") specific = `${fieldText("Host", `${path}.config.host`, config.host || "localhost", "span-4", editable)}${fieldNumber("Port", `${path}.config.port`, config.port || 1883, "span-2", editable, "integer")}${fieldText("Topic prefix", `${path}.config.topic_prefix`, config.topic_prefix || "", "span-6", editable)}`;
   if (target.kind === "sql_server") specific = `${fieldText("Server", `${path}.config.server`, config.server || "localhost", "span-4", editable)}${fieldNumber("Port", `${path}.config.port`, config.port || 1433, "span-2", editable, "integer")}${fieldText("Database", `${path}.config.database`, config.database || "Simulator", "span-3", editable)}${fieldText("Table", `${path}.config.table`, config.table || "dbo.tag_snapshots", "span-3", editable)}${fieldSelect("Authentication", `${path}.config.auth`, config.auth || "windows", [["windows", "Windows"], ["sql", "SQL login"]], "span-3", editable)}${fieldNumber("Batch size", `${path}.config.batch_size`, config.batch_size || 100, "span-3", editable, "integer")}${fieldText("Username", `${path}.config.username`, config.username || "", "span-3", editable)}${fieldText("Password", `${path}.config.password`, config.password || "", "span-3", editable)}`;
   if (target.kind === "odata") specific = `${fieldText("Entity set", `${path}.config.entity_set`, config.entity_set || "SimulationValues", "span-6", editable)}${fieldNumber("Retained rows", `${path}.config.max_rows`, config.max_rows || 10000, "span-3", editable, "integer")}`;
-  if (target.kind === "http") specific = `<div class="notice info" style="grid-column:1/-1">HTTP uses the shared Industrial FastAPI host and exposes snapshot, NDJSON, SSE and WebSocket endpoints for this simulation.</div>`;
-  return `<div class="form-grid">${specific}<div class="form-divider"></div><div class="subsection-title">Delivery policy</div>${commonTargetFields(target, index, editable)}${runtime ? `<div class="form-divider"></div><div class="subsection-title">Live state</div>${readOnlyMetric("Published", runtime.published_frames || 0)}${readOnlyMetric("Queue", runtime.queue_depth || 0)}${readOnlyMetric("Dropped", runtime.dropped_frames || 0)}` : ""}</div>`;
+  if (target.kind === "http") specific = `<div class="notice info" style="grid-column:1/-1">HTTP Stream uses the shared Industrial FastAPI host and exposes snapshot, NDJSON, SSE and WebSocket views of the canonical frame.</div>`;
+  const apiMetrics = target.kind === "api" || target.kind === "rest_api"
+    ? `${readOnlyMetric("Requests", runtime?.details?.request_count || 0)}${readOnlyMetric("History", runtime?.details?.history_count || 0)}`
+    : "";
+  return `<div class="form-grid">${specific}<div class="form-divider"></div><div class="subsection-title">Delivery policy</div>${commonTargetFields(target, index, editable)}${runtime ? `<div class="form-divider"></div><div class="subsection-title">Live state</div>${readOnlyMetric("Published", runtime.published_frames || 0)}${readOnlyMetric("Queue", runtime.queue_depth || 0)}${readOnlyMetric("Dropped", runtime.dropped_frames || 0)}${apiMetrics}` : ""}</div>`;
+}
+
+function renderApiTarget(path, config, editable) {
+  const responseMode = config.response_mode || "record";
+  return `
+    <div class="subsection-title">Request</div>
+    ${fieldSelect("Method", `${path}.config.method`, config.method || "GET", [["GET", "GET"], ["POST", "POST"], ["PUT", "PUT"], ["PATCH", "PATCH"], ["DELETE", "DELETE"], ["HEAD", "HEAD"]], "span-3", editable)}
+    ${fieldText("Public path", `${path}.config.path`, config.path || "/simulation", "span-6", editable, "Served under /sim-api. Use {name} for path parameters, for example /orders/{order_id}.")}
+    ${fieldNumber("Response delay (ms)", `${path}.config.delay_ms`, config.delay_ms ?? 0, "span-3", editable, "integer", "Simulate API latency.", 0, 300000)}
+    ${fieldTextarea("Required request headers", `${path}.config.required_headers`, config.required_headers || "", "span-6", editable, "One per line as Header: value. Useful for simulating API keys or Authorization headers.")}
+    ${fieldTextarea("Response headers", `${path}.config.response_headers`, config.response_headers || "", "span-6", editable, "One per line as Header: value.")}
+    <div class="form-divider"></div><div class="subsection-title">Response</div>
+    ${fieldSelect("Response shape", `${path}.config.response_mode`, responseMode, [["record", "Flat live record"], ["values", "Live values only"], ["frame", "Full canonical frame"], ["history", "Retained history"], ["template", "Custom JSON template"]], "span-4", editable)}
+    ${fieldNumber("Success status", `${path}.config.status_code`, config.status_code ?? 200, "span-2", editable, "integer", "", 100, 599)}
+    ${fieldNumber("No-data status", `${path}.config.empty_status_code`, config.empty_status_code ?? 503, "span-2", editable, "integer", "Returned before the first frame is published.", 100, 599)}
+    ${fieldNumber("History rows", `${path}.config.history_size`, config.history_size ?? 100, "span-2", editable, "integer", "Used by History response shape.", 1, 100000)}
+    ${fieldText("Envelope", `${path}.config.envelope`, config.envelope || "", "span-2", editable, "Optional top-level property, e.g. data.")}
+    ${fieldText("Fields", `${path}.config.fields`, Array.isArray(config.fields) ? config.fields.join(", ") : (config.fields || ""), "span-6", editable, "Optional comma-separated canonical signal names.")}
+    <div class="field span-3"><span class="field-label">Include context</span><div class="checkbox-line"><input type="checkbox" data-bind="${path}.config.include_context" ${checked(config.include_context)} ${disabled(!editable)} /><label>Merge frame context into flat records</label></div></div>
+    <div class="field span-3"><span class="field-label">System fields</span><div class="checkbox-line"><input type="checkbox" data-bind="${path}.config.include_system_fields" ${checked(config.include_system_fields !== false)} ${disabled(!editable)} /><label>Sequence, timestamps and simulation ID</label></div></div>
+    ${responseMode === "template" ? fieldTextarea("Custom JSON response", `${path}.config.response_template`, typeof config.response_template === "string" ? config.response_template : JSON.stringify(config.response_template || {}, null, 2), "span-12", editable, "Tokens: ${values.Tag}, ${context.Key}, ${path.id}, ${query.name}, ${body.field}, ${meta.sequence}. Exact-token values preserve their JSON type.", "mono") : ""}
+    <div class="notice info" style="grid-column:1/-1"><strong>API target.</strong> The endpoint exists only while this simulation target is running. It always responds from this simulation's current mapped data; add another API target when you need another independent route.</div>`;
 }
 
 function commonTargetFields(target, index, editable) {
@@ -515,6 +545,10 @@ function lockedNotice() {
 
 function fieldText(label, path, value, span = "span-6", editable = true, help = "", role = "") {
   return `<div class="field ${span}"><label>${esc(label)}</label><input data-bind="${attr(path)}" ${role ? `data-role="${attr(role)}"` : ""} value="${attr(value)}" ${disabled(!editable)} />${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
+}
+
+function fieldTextarea(label, path, value, span = "span-12", editable = true, help = "", className = "") {
+  return `<div class="field ${span}"><label>${esc(label)}</label><textarea data-bind="${attr(path)}" class="${attr(className)}" ${disabled(!editable)}>${esc(value)}</textarea>${help ? `<span class="help">${esc(help)}</span>` : ""}</div>`;
 }
 
 function fieldNumber(label, path, value, span = "span-3", editable = true, valueType = "number", help = "", min = null, max = null, step = null) {
