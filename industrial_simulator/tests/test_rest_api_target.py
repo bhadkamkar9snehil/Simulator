@@ -138,20 +138,66 @@ def test_api_history_uses_same_canonical_frames() -> None:
         asyncio.run(target.stop())
 
 
-def test_duplicate_live_method_and_path_are_rejected() -> None:
-    first = RestApiTarget(TargetBinding(target_id="first", kind="api", config={"method": "GET", "path": "/same"}))
-    second = RestApiTarget(TargetBinding(target_id="second", kind="api", config={"method": "GET", "path": "/same"}))
+def test_semantically_duplicate_dynamic_routes_are_rejected() -> None:
+    first = RestApiTarget(TargetBinding(target_id="first", kind="api", config={"method": "GET", "path": "/orders/{id}"}))
+    second = RestApiTarget(TargetBinding(target_id="second", kind="api", config={"method": "GET", "path": "/orders/{name}"}))
     asyncio.run(first.start("sim-one", "One", []))
     try:
         try:
             asyncio.run(second.start("sim-two", "Two", []))
         except ValueError as exc:
-            assert "already in use" in str(exc)
+            assert "conflicts with" in str(exc)
         else:
-            raise AssertionError("Duplicate simulated API routes must be rejected.")
+            raise AssertionError("Equivalent dynamic API routes must be rejected.")
     finally:
         asyncio.run(first.stop())
         api_registry.remove("sim-two", "second")
+
+
+def test_static_route_wins_over_dynamic_route() -> None:
+    dynamic = RestApiTarget(TargetBinding(
+        target_id="dynamic",
+        kind="api",
+        config={
+            "method": "GET",
+            "path": "/orders/{id}",
+            "response_mode": "template",
+            "response_template": '{"kind":"dynamic","id":"${path.id}"}',
+        },
+    ))
+    static = RestApiTarget(TargetBinding(
+        target_id="static",
+        kind="api",
+        config={
+            "method": "GET",
+            "path": "/orders/current",
+            "response_mode": "template",
+            "response_template": '{"kind":"static"}',
+        },
+    ))
+    asyncio.run(dynamic.start("sim-dynamic", "Dynamic", []))
+    asyncio.run(static.start("sim-static", "Static", []))
+    try:
+        assert _client().get("/sim-api/orders/current").json() == {"kind": "static"}
+        assert _client().get("/sim-api/orders/A-1").json() == {"kind": "dynamic", "id": "A-1"}
+    finally:
+        asyncio.run(dynamic.stop())
+        asyncio.run(static.stop())
+
+
+def test_api_target_keeps_request_metrics_after_stop() -> None:
+    target = RestApiTarget(TargetBinding(
+        target_id="metrics-api",
+        kind="api",
+        config={"method": "GET", "path": "/metrics", "response_mode": "template", "response_template": '{"ok":true}'},
+    ))
+    asyncio.run(target.start("sim-metrics", "Metrics", []))
+    assert _client().get("/sim-api/metrics").status_code == 200
+    asyncio.run(target.stop())
+    status = target.status()
+    assert status.state == "stopped"
+    assert status.details["request_count"] == 1
+    assert status.details["path"] == "/sim-api/metrics"
 
 
 def test_simulation_manager_publishes_source_data_to_callable_api(tmp_path) -> None:
