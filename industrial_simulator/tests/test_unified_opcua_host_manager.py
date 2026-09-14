@@ -60,7 +60,7 @@ def _fake_runtime(monkeypatch) -> None:
     monkeypatch.setattr(opcua_module, "Server", object())
 
 
-def _shared_binding(target_id: str = "opcua") -> TargetBinding:
+def _shared_binding(target_id: str = "opcua", port: int = 4840) -> TargetBinding:
     return TargetBinding(
         target_id=target_id,
         kind="opcua",
@@ -68,10 +68,24 @@ def _shared_binding(target_id: str = "opcua") -> TargetBinding:
         config={
             "bind_host": "0.0.0.0",
             "advertised_host": "localhost",
-            "port": 4840,
+            "port": port,
             "path": "simulator",
             "namespace_uri": "http://local/unified-simulator",
             "root_folder": "Simulations",
+        },
+    )
+
+
+def _dedicated_binding(target_id: str = "opcua", port: int = 4842) -> TargetBinding:
+    return TargetBinding(
+        target_id=target_id,
+        kind="opcua",
+        hosting_mode="dedicated",
+        config={
+            "bind_host": "127.0.0.1",
+            "advertised_host": "test-host",
+            "port": port,
+            "path": "line-a",
         },
     )
 
@@ -90,7 +104,7 @@ def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) 
         assert first.server.start_count == 1
         assert first.server.stop_count == 0
 
-        status = manager.status()["shared_opcua_hosts"]["0.0.0.0:4840/simulator"]
+        status = manager.status()["shared_opcua_hosts"]["0.0.0.0:4840"]
         assert status["simulation_count"] == 2
         assert status["target_count"] == 2
         assert status["tag_count"] == 4
@@ -107,7 +121,7 @@ def test_shared_host_add_remove_does_not_restart_other_simulations(monkeypatch) 
         await manager.release_opcua(first)
         assert first.server.running is True
         assert first.server.stop_count == 0
-        remaining = manager.status()["shared_opcua_hosts"]["0.0.0.0:4840/simulator"]
+        remaining = manager.status()["shared_opcua_hosts"]["0.0.0.0:4840"]
         assert remaining["simulation_count"] == 1
         assert remaining["simulation_targets"][0]["simulation_id"] == "sim-b"
         assert all(not key.startswith("sim-a.") for key in first.server.variables)
@@ -127,7 +141,7 @@ def test_same_target_id_is_scoped_per_simulation(monkeypatch) -> None:
         first = await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding("primary"), SCHEMA)
         second = await manager.acquire_opcua("sim-b", "Simulation B", _shared_binding("primary"), SCHEMA)
         assert first.member_key != second.member_key
-        assert set(manager.status()["shared_opcua_hosts"]["0.0.0.0:4840/simulator"]["simulation_targets"][0]) >= {
+        assert set(manager.status()["shared_opcua_hosts"]["0.0.0.0:4840"]["simulation_targets"][0]) >= {
             "member_key",
             "simulation_id",
             "target_id",
@@ -159,26 +173,69 @@ def test_shared_listener_rejects_conflicting_host_level_settings(monkeypatch) ->
     asyncio.run(exercise())
 
 
+def test_shared_listener_rejects_different_path_on_same_port(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding(), SCHEMA)
+        conflicting = _shared_binding("other")
+        conflicting.config["path"] = "another-endpoint"
+        try:
+            await manager.acquire_opcua("sim-b", "Simulation B", conflicting, SCHEMA)
+        except ValueError as exc:
+            assert "Shared OPC UA listener settings conflict" in str(exc)
+        else:
+            raise AssertionError("Expected shared listener path conflict")
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_dedicated_targets_honor_bind_host(monkeypatch) -> None:
     _fake_runtime(monkeypatch)
     manager = opcua_module.InterfaceHostManager()
 
     async def exercise() -> None:
-        binding = TargetBinding(
-            target_id="opcua",
-            kind="opcua",
-            hosting_mode="dedicated",
-            config={
-                "bind_host": "127.0.0.1",
-                "advertised_host": "test-host",
-                "port": 4842,
-                "path": "line-a",
-            },
-        )
-        handle = await manager.acquire_opcua("sim-a", "Simulation A", binding, SCHEMA)
+        handle = await manager.acquire_opcua("sim-a", "Simulation A", _dedicated_binding(), SCHEMA)
         assert handle.server.endpoint == "opc.tcp://127.0.0.1:4842/line-a"
         assert handle.server.get_endpoint() == "opc.tcp://test-host:4842/line-a"
         assert handle.member_key == "sim-a/opcua"
         await manager.release_opcua(handle)
+
+    asyncio.run(exercise())
+
+
+def test_dedicated_targets_cannot_reserve_same_port_twice(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        first = await manager.acquire_opcua("sim-a", "Simulation A", _dedicated_binding("opcua-a", 4842), SCHEMA)
+        try:
+            await manager.acquire_opcua("sim-b", "Simulation B", _dedicated_binding("opcua-b", 4842), SCHEMA)
+        except ValueError as exc:
+            assert "already reserved" in str(exc)
+        else:
+            raise AssertionError("Expected duplicate dedicated port reservation to fail")
+        assert first.server.running is True
+        await manager.release_opcua(first)
+
+    asyncio.run(exercise())
+
+
+def test_shared_and_dedicated_targets_cannot_share_port(monkeypatch) -> None:
+    _fake_runtime(monkeypatch)
+    manager = opcua_module.InterfaceHostManager()
+
+    async def exercise() -> None:
+        shared = await manager.acquire_opcua("sim-a", "Simulation A", _shared_binding(port=4840), SCHEMA)
+        try:
+            await manager.acquire_opcua("sim-b", "Simulation B", _dedicated_binding("dedicated", 4840), SCHEMA)
+        except ValueError as exc:
+            assert "shared listener" in str(exc)
+        else:
+            raise AssertionError("Expected shared/dedicated port reservation conflict")
+        await manager.release_opcua(shared)
 
     asyncio.run(exercise())
