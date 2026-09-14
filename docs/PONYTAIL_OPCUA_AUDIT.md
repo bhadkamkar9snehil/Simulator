@@ -22,7 +22,7 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 | P0-05 | P0 | FIXED | StatusCode semantics differed between legacy and unified runtimes | Both surfaces delegate exact named/numeric quality semantics to the canonical StatusCode conversion. |
 | P1-01 | P1 | FIXED | `quality_column` and `source_timestamp_column` were configuration without complete replay behavior | Replay validates and emits configured quality/source-timestamp columns to OPC UA while preserving MQTT compatibility. |
 | P1-02 | P1 | FIXED | Diagnostics UI had an independent/indirect status-update path | One `/api/status` poll in `app.js` feeds the base status UI and OPC UA diagnostics renderer directly. |
-| P1-03 | P1 | OPEN | Diagnostics JS still owns presentation markup generation for tables and depends on diagnostics-specific DOM structure | Keep static layout/styles in HTML/CSS and make diagnostics JS render data only into existing elements. |
+| P1-03 | P1 | FIXED | Diagnostics JS owned diagnostics-table presentation structure | Diagnostics panel/table structure is static HTML; CSS owns presentation; JS only writes values/rows and empty-state visibility. |
 | P1-04 | P1 | OPEN | Rich diagnostics are attached to the legacy UI/status surface rather than unified interface-host view | Unified `/api/v2/interfaces` and Portal host UI become the canonical diagnostics surface. |
 | P1-05 | P1 | OPEN | Session diagnostics depend on asyncua private fields without explicit capability reporting | Keep introspection isolated and expose availability/degradation explicitly. |
 | P2-01 | P2 | OPEN | OPC UA datatype constants are duplicated across modules | One canonical datatype registry. |
@@ -86,7 +86,14 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 - Removed diagnostics-side network polling and the MutationObserver/raw-JSON DOM relay.
 - Ownership rule: `app.js` owns status transport/polling; diagnostics JS is a renderer only.
 
-### Documentation reconciliation
+### P1-03 — static diagnostics presentation — `32e188f`, `e49285e`
+
+- Moved session/activity table structure and headers into `index.html`.
+- Kept diagnostics presentation in static CSS.
+- Diagnostics JS now only updates text, row bodies and empty-state visibility; it no longer creates table structure.
+- Ownership rule: HTML owns structure, CSS owns presentation, JS owns rendering data into existing elements.
+
+### Documentation reconciliation — `8900874`
 
 - Removed stale/future issue statuses and commit references that were not represented by the current branch head.
-- P1-03 is the next open issue.
+- P1-04 is now the next open issue.
