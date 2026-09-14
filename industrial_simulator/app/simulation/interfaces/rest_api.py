@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from ..models import SignalDefinition, SimulationFrame, TargetBinding, TargetRuntimeStatus
 
@@ -18,6 +20,8 @@ router = APIRouter(prefix="/sim-api", tags=["Simulated APIs"])
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 _RESPONSE_MODES = {"values", "frame", "record", "history", "template"}
 _SELECTION_MODES = {"current", "history_match"}
+_BODY_MODES = {"json", "text", "empty"}
+_HISTORY_ORDERS = {"oldest_first", "newest_first"}
 _TOKEN_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)\}")
 _SEGMENT_PARAM_RE = re.compile(r"^\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -99,6 +103,31 @@ def _specificity(path: str) -> tuple[int, int]:
     return static_count, len(parts)
 
 
+def _choice(config: dict[str, Any], key: str, default: str, allowed: set[str], label: str) -> str:
+    value = str(config.get(key, default)).strip().lower()
+    if value not in allowed:
+        raise ValueError(f"Unsupported API {label}: {value}")
+    return value
+
+
+def _status_codes(config: dict[str, Any]) -> tuple[int, int, int]:
+    codes = (
+        int(config.get("status_code", 200)),
+        int(config.get("empty_status_code", 503)),
+        int(config.get("not_found_status", 404)),
+    )
+    if any(not 100 <= code <= 599 for code in codes):
+        raise ValueError("API status codes must be between 100 and 599.")
+    return codes
+
+
+def _bounded_int(config: dict[str, Any], key: str, default: int, minimum: int, maximum: int) -> int:
+    value = int(config.get(key, default))
+    if not minimum <= value <= maximum:
+        raise ValueError(f"API {key} must be between {minimum} and {maximum}.")
+    return value
+
+
 def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
     method = str(config.get("method", "GET")).strip().upper()
     if method not in _ALLOWED_METHODS:
@@ -106,27 +135,18 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
 
     path = _clean_path(str(config.get("path", "/")))
     _path_pattern(path)
-
-    response_mode = str(config.get("response_mode", "values")).strip().lower()
-    if response_mode not in _RESPONSE_MODES:
-        raise ValueError(f"Unsupported API response mode: {response_mode}")
-
-    selection_mode = str(config.get("selection_mode", "current")).strip().lower()
-    if selection_mode not in _SELECTION_MODES:
-        raise ValueError(f"Unsupported API selection mode: {selection_mode}")
-
-    status_code = int(config.get("status_code", 200))
-    empty_status_code = int(config.get("empty_status_code", 503))
-    not_found_status = int(config.get("not_found_status", 404))
-    if any(not 100 <= code <= 599 for code in (status_code, empty_status_code, not_found_status)):
-        raise ValueError("API status codes must be between 100 and 599.")
-
-    delay_ms = int(config.get("delay_ms", 0))
-    history_size = int(config.get("history_size", 100))
-    if not 0 <= delay_ms <= 300_000:
-        raise ValueError("API delay_ms must be between 0 and 300000.")
-    if not 1 <= history_size <= 100_000:
-        raise ValueError("API history_size must be between 1 and 100000.")
+    response_mode = _choice(config, "response_mode", "values", _RESPONSE_MODES, "response mode")
+    selection_mode = _choice(config, "selection_mode", "current", _SELECTION_MODES, "selection mode")
+    body_mode = _choice(config, "body_mode", "json", _BODY_MODES, "body mode")
+    history_order = _choice(config, "history_order", "oldest_first", _HISTORY_ORDERS, "history order")
+    status_code, empty_status_code, not_found_status = _status_codes(config)
+    delay_ms = _bounded_int(config, "delay_ms", 0, 0, 300_000)
+    delay_jitter_ms = _bounded_int(config, "delay_jitter_ms", 0, 0, 300_000)
+    history_size = _bounded_int(config, "history_size", 100, 1, 100_000)
+    default_page_size = _bounded_int(config, "default_page_size", history_size, 1, 100_000)
+    max_page_size = _bounded_int(config, "max_page_size", max(history_size, default_page_size), 1, 100_000)
+    if default_page_size > max_page_size:
+        raise ValueError("API default_page_size cannot exceed max_page_size.")
 
     match_frame = str(config.get("match_frame", "")).strip()
     match_request = str(config.get("match_request", "")).strip()
@@ -138,11 +158,17 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
         "path": path,
         "response_mode": response_mode,
         "selection_mode": selection_mode,
+        "body_mode": body_mode,
+        "media_type": str(config.get("media_type", "")).strip() or None,
         "status_code": status_code,
         "empty_status_code": empty_status_code,
         "not_found_status": not_found_status,
         "delay_ms": delay_ms,
+        "delay_jitter_ms": delay_jitter_ms,
         "history_size": history_size,
+        "history_order": history_order,
+        "default_page_size": default_page_size,
+        "max_page_size": max_page_size,
         "fields": _parse_fields(config.get("fields")),
         "envelope": str(config.get("envelope", "")).strip(),
         "include_context": bool(config.get("include_context", False)),
@@ -150,6 +176,7 @@ def validate_api_config(config: dict[str, Any]) -> dict[str, Any]:
         "response_headers": _parse_headers(config.get("response_headers")),
         "required_headers": _parse_headers(config.get("required_headers")),
         "response_template": _parse_template(config.get("response_template")),
+        "text_template": str(config.get("text_template", "")),
         "match_frame": match_frame,
         "match_request": match_request,
     }
@@ -163,10 +190,13 @@ class ApiProjection:
     path: str
     response_mode: str
     selection_mode: str
+    body_mode: str
+    media_type: str | None
     status_code: int
     empty_status_code: int
     not_found_status: int
     delay_ms: int
+    delay_jitter_ms: int
     fields: list[str]
     envelope: str
     include_context: bool
@@ -174,14 +204,23 @@ class ApiProjection:
     response_headers: dict[str, str]
     required_headers: dict[str, str]
     response_template: Any
+    text_template: str
     history_size: int
+    history_order: str
+    default_page_size: int
+    max_page_size: int
     match_frame: str
     match_request: str
     pattern: re.Pattern[str]
     current: SimulationFrame | None = None
     history: deque[SimulationFrame] = field(init=False)
     request_count: int = 0
+    success_count: int = 0
+    client_error_count: int = 0
+    server_error_count: int = 0
     last_request_at: str | None = None
+    last_status_code: int | None = None
+    last_latency_ms: float | None = None
 
     def __post_init__(self) -> None:
         self.history = deque(maxlen=self.history_size)
@@ -189,6 +228,16 @@ class ApiProjection:
     def publish(self, frame: SimulationFrame) -> None:
         self.current = frame
         self.history.append(frame)
+
+    def record_request(self, status_code: int, latency_ms: float) -> None:
+        self.last_status_code = status_code
+        self.last_latency_ms = round(latency_ms, 2)
+        if 200 <= status_code < 400:
+            self.success_count += 1
+        elif 400 <= status_code < 500:
+            self.client_error_count += 1
+        elif status_code >= 500:
+            self.server_error_count += 1
 
 
 class ApiRegistry:
@@ -241,9 +290,15 @@ class ApiRegistry:
                 "method": item.method,
                 "path": f"/sim-api{item.path}",
                 "response_mode": item.response_mode,
+                "body_mode": item.body_mode,
                 "selection_mode": item.selection_mode,
                 "request_count": item.request_count,
+                "success_count": item.success_count,
+                "client_error_count": item.client_error_count,
+                "server_error_count": item.server_error_count,
                 "last_request_at": item.last_request_at,
+                "last_status_code": item.last_status_code,
+                "last_latency_ms": item.last_latency_ms,
             }
             for item in self._items.values()
         ]
@@ -301,11 +356,17 @@ class RestApiTarget:
             return {}
         return {
             "request_count": projection.request_count,
+            "success_count": projection.success_count,
+            "client_error_count": projection.client_error_count,
+            "server_error_count": projection.server_error_count,
             "last_request_at": projection.last_request_at,
+            "last_status_code": projection.last_status_code,
+            "last_latency_ms": projection.last_latency_ms,
             "history_count": len(projection.history),
             "method": projection.method,
             "path": f"/sim-api{projection.path}",
             "response_mode": projection.response_mode,
+            "body_mode": projection.body_mode,
             "selection_mode": projection.selection_mode,
         }
 
@@ -388,7 +449,29 @@ def _selected_frame(projection: ApiProjection, path_params: dict[str, str], quer
     raise HTTPException(status_code=projection.not_found_status, detail="No simulated record matched the request.")
 
 
-def _response_payload(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> Any:
+def _history_payload(projection: ApiProjection, query: dict[str, str]) -> list[dict[str, Any]]:
+    frames = list(projection.history)
+    if projection.history_order == "newest_first":
+        frames.reverse()
+    offset = _query_int(query, "offset", 0, 0, len(frames))
+    limit = _query_int(query, "limit", projection.default_page_size, 1, projection.max_page_size)
+    return [_record(item, projection) for item in frames[offset:offset + limit]]
+
+
+def _query_int(query: dict[str, str], name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = query.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Query parameter {name} must be an integer.") from exc
+    if not minimum <= value <= maximum:
+        raise HTTPException(status_code=400, detail=f"Query parameter {name} must be between {minimum} and {maximum}.")
+    return value
+
+
+def _json_payload(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> Any:
     frame = _selected_frame(projection, path_params, query, body)
     if projection.response_mode == "template":
         payload = _render_template(projection.response_template, _request_scope(frame, path_params, query, body))
@@ -404,37 +487,86 @@ def _response_payload(projection: ApiProjection, path_params: dict[str, str], qu
         elif projection.response_mode == "record":
             payload = _record(frame, projection)
         else:
-            payload = [_record(item, projection) for item in projection.history]
-
+            payload = _history_payload(projection, query)
     return {projection.envelope: payload} if projection.envelope else payload
 
 
-async def _dispatch(request: Request, request_path: str) -> JSONResponse:
+def _template_uses_frame(value: str) -> bool:
+    return any(f"${{{scope}." in value for scope in ("values", "context", "meta"))
+
+
+def _text_payload(projection: ApiProjection, path_params: dict[str, str], query: dict[str, str], body: Any) -> str:
+    frame = _selected_frame(projection, path_params, query, body)
+    if frame is None and _template_uses_frame(projection.text_template):
+        raise HTTPException(status_code=projection.empty_status_code, detail="Simulation has not published data yet.")
+    rendered = _render_template(projection.text_template, _request_scope(frame, path_params, query, body))
+    return "" if rendered is None else str(rendered)
+
+
+def _bodyless_status(status_code: int) -> bool:
+    return status_code < 200 or status_code in {204, 304}
+
+
+def _response(projection: ApiProjection, request_method: str, path_params: dict[str, str], query: dict[str, str], body: Any) -> Response:
+    headers = projection.response_headers
+    if request_method == "HEAD" or projection.body_mode == "empty" or _bodyless_status(projection.status_code):
+        return Response(status_code=projection.status_code, headers=headers)
+    if projection.body_mode == "text":
+        return Response(
+            content=_text_payload(projection, path_params, query, body),
+            status_code=projection.status_code,
+            headers=headers,
+            media_type=projection.media_type or "text/plain",
+        )
+    return JSONResponse(
+        content=_json_payload(projection, path_params, query, body),
+        status_code=projection.status_code,
+        headers=headers,
+        media_type=projection.media_type or "application/json",
+    )
+
+
+def _request_delay_seconds(projection: ApiProjection) -> float:
+    jitter = random.uniform(0, projection.delay_jitter_ms) if projection.delay_jitter_ms else 0.0
+    return (projection.delay_ms + jitter) / 1000.0
+
+
+async def _dispatch(request: Request, request_path: str) -> Response:
     projection, path_params = api_registry.match(request.method.upper(), request_path)
-    for name, expected in projection.required_headers.items():
-        if request.headers.get(name) != expected:
-            raise HTTPException(status_code=401, detail=f"Required request header missing or invalid: {name}")
-    if projection.delay_ms:
-        await asyncio.sleep(projection.delay_ms / 1000.0)
-    body: Any = None
-    if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
-        raw = await request.body()
-        if raw:
-            try:
-                body = json.loads(raw)
-            except json.JSONDecodeError:
-                body = raw.decode("utf-8", errors="replace")
+    started = time.perf_counter()
     projection.request_count += 1
     projection.last_request_at = _utc_now_iso()
-    payload = _response_payload(projection, path_params, dict(request.query_params), body)
-    return JSONResponse(content=payload, status_code=projection.status_code, headers=projection.response_headers)
+    status_code = 500
+    try:
+        for name, expected in projection.required_headers.items():
+            if request.headers.get(name) != expected:
+                raise HTTPException(status_code=401, detail=f"Required request header missing or invalid: {name}")
+        delay = _request_delay_seconds(projection)
+        if delay:
+            await asyncio.sleep(delay)
+        body: Any = None
+        if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+            raw = await request.body()
+            if raw:
+                try:
+                    body = json.loads(raw)
+                except json.JSONDecodeError:
+                    body = raw.decode("utf-8", errors="replace")
+        response = _response(projection, request.method.upper(), path_params, dict(request.query_params), body)
+        status_code = response.status_code
+        return response
+    except HTTPException as exc:
+        status_code = exc.status_code
+        raise
+    finally:
+        projection.record_request(status_code, (time.perf_counter() - started) * 1000.0)
 
 
 @router.api_route("", methods=sorted(_ALLOWED_METHODS))
-async def simulated_api_root(request: Request) -> JSONResponse:
+async def simulated_api_root(request: Request) -> Response:
     return await _dispatch(request, "/")
 
 
 @router.api_route("/{request_path:path}", methods=sorted(_ALLOWED_METHODS))
-async def simulated_api(request: Request, request_path: str) -> JSONResponse:
+async def simulated_api(request: Request, request_path: str) -> Response:
     return await _dispatch(request, "/" + request_path)
