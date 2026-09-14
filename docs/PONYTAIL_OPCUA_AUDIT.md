@@ -15,8 +15,8 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 
 | ID | Priority | Status | Issue | Required outcome |
 |---|---|---|---|---|
-| P0-01 | P0 | IN PROGRESS | Duplicate OPC UA datatype implementations (`opcua_types.py` and datatype logic in `opcua_support.py`) | `opcua_types.py` becomes the single canonical OPC UA coercion/Variant/StatusCode/DataValue implementation used by legacy and unified runtimes. |
-| P0-02 | P0 | OPEN | Legacy and unified OPC UA server implementations have overlapping ownership | Unified runtime/InterfaceHostManager becomes canonical; legacy replay becomes compatibility-facing rather than an equal implementation. |
+| P0-01 | P0 | FIXED | Duplicate OPC UA datatype implementations (`opcua_types.py` and datatype logic in `opcua_support.py`) | `opcua_types.py` is now the single canonical OPC UA coercion/Variant/StatusCode/default implementation. `opcua_support.py` retains compatibility facades only. |
+| P0-02 | P0 | IN PROGRESS | Legacy and unified OPC UA server implementations have overlapping ownership | Unified runtime/InterfaceHostManager becomes canonical; legacy replay becomes compatibility-facing rather than an equal implementation. |
 | P0-03 | P0 | OPEN | `DataType = str` weakens validation outside `TagMapping` | Validate supported scalar/array OPC UA types at shared model boundaries. |
 | P0-04 | P0 | OPEN | `type_inference.convert_value()` is still an execution-time conversion path | Type inference remains inference-only; OPC UA execution uses the canonical type layer. |
 | P0-05 | P0 | OPEN | StatusCode semantics differ between legacy and unified runtimes | Exact named/numeric quality semantics are shared; invalid quality never silently becomes Good. |
@@ -40,7 +40,15 @@ Purpose: track the architectural cleanup required after the comprehensive OPC UA
 
 ## Change log
 
-### Audit initialization
+### Audit initialization — `aab9dc6`
 
 - Recorded the issues found during the 2026-09-14 Ponytail audit.
 - P0-01 selected as the first cleanup item because datatype semantics must have exactly one owner before subsequent replay/model fixes are safe.
+
+### P0-01 — canonical OPC UA datatype layer — `5f2652a`, `9f69cf5`
+
+- Removed the independent datatype registry and coercion/Variant/StatusCode/default implementations from `opcua_support.py`.
+- `opcua_support.py` now delegates datatype behavior to `opcua_types.py` while retaining the old function signatures as a compatibility facade.
+- Unified type overrides now accept the same scalar and array syntax as the canonical layer.
+- Updated support tests to exercise canonical array and strict integer-range behavior through the compatibility facade.
+- Ownership rule: OPC UA datatype semantics have one owner: `app/opcua_types.py`.
