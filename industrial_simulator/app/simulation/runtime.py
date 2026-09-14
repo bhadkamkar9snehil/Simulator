@@ -165,6 +165,7 @@ class SimulationInstance:
         self.run_gate = asyncio.Event()
         self.run_gate.set()
         self.lifecycle_lock = asyncio.Lock()
+        self.source_lock = asyncio.Lock()
         self.clock = _FrameClock(definition)
         self.emitted_count = 0
         self.started_at: str | None = None
@@ -176,6 +177,7 @@ class SimulationInstance:
         self.last_source_count: int | None = None
         self.start_position = 0
         self.direction = 1
+        self.cursor_generation = 0
         self.fatal_error: str | None = None
 
     async def start(self) -> SimulationStatus:
@@ -273,11 +275,13 @@ class SimulationInstance:
         if source is None:
             raise ValueError("Simulation source is not open.")
         await asyncio.gather(*(runner.drain() for runner in self.runners))
-        await source.seek(position)
-        self.direction = 1
-        self.clock.reset()
-        self.last_frame = None
-        self.last_source_position = source.position
+        async with self.source_lock:
+            await source.seek(position)
+            self.cursor_generation += 1
+            self.direction = 1
+            self.clock.reset()
+            self.last_frame = None
+            self.last_source_position = source.position
         self.updated_at = utc_now_iso()
         return self.status()
 
@@ -290,6 +294,7 @@ class SimulationInstance:
         self.last_source_position = 0
         self.last_source_count = None
         self.direction = 1
+        self.cursor_generation += 1
         self.clock.reset()
         self.run_gate.set()
 
@@ -308,7 +313,9 @@ class SimulationInstance:
                     continue
                 if self.fatal_error:
                     raise RuntimeError(self.fatal_error)
-                frame = await self._next_frame()
+                generation = self.cursor_generation
+                async with self.source_lock:
+                    frame = await self._next_frame()
                 if frame is None:
                     await asyncio.gather(*(runner.drain() for runner in self.runners))
                     self.state = "completed"
@@ -316,6 +323,8 @@ class SimulationInstance:
                     break
                 await self.clock.wait(frame)
                 await self.run_gate.wait()
+                if generation != self.cursor_generation:
+                    continue
                 if self.state != "running":
                     continue
                 frame = self._decorate_frame(frame)
