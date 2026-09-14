@@ -149,6 +149,13 @@ class OpcUaTagServer:
             return
         await self._configure_tags_impl(config)
 
+    @staticmethod
+    def _initial_value_for_tag(tag: Any) -> Any:
+        fields_set = getattr(tag, "model_fields_set", set())
+        if "initial_value" in fields_set:
+            return tag.initial_value
+        return default_value(tag.data_type)
+
     async def _configure_tags_impl(self, config: ReplayConfig) -> None:
         self.namespace_uri = config.namespace_uri
         self.variables.clear()
@@ -165,7 +172,7 @@ class OpcUaTagServer:
 
         if self.mock_mode or self.server is None:
             for tag in enabled_tags:
-                initial = tag.initial_value if tag.initial_value is not None else default_value(tag.data_type)
+                initial = self._initial_value_for_tag(tag)
                 self.variables[tag.node_id] = {
                     "value": coerce_value(tag.data_type, initial),
                     "data_type": tag.data_type,
@@ -180,7 +187,7 @@ class OpcUaTagServer:
         used_names: set[str] = set()
         for tag in enabled_tags:
             browse_name = self._browse_name(tag.node_id, tag.tag_name, used_names)
-            initial = tag.initial_value if tag.initial_value is not None else default_value(tag.data_type)
+            initial = self._initial_value_for_tag(tag)
             coerced = coerce_value(tag.data_type, initial)
             if ua is None:
                 raise RuntimeError("asyncua UA types are unavailable.")
