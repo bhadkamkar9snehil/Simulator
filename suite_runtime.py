@@ -43,14 +43,12 @@ BOOTSTRAP_STATE = VENV_DIR / ".bootstrap_state.json"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 DEFAULT_PORTS = {
     "industrial_web_port": "8000",
-    "api_studio_port": "5050",
     "portal_port": "8001",
     "opcua_port": "4840",
     "mqtt_broker_port": "1883",
 }
 ENV_PORT_MAP = {
     "industrial_web_port": "INDUSTRIAL_WEB_PORT",
-    "api_studio_port": "API_STUDIO_PORT",
     "portal_port": "PORTAL_PORT",
     "opcua_port": "OPCUA_PORT",
     "mqtt_broker_port": "MQTT_BROKER_PORT",
@@ -160,20 +158,21 @@ def ports_from_env(env: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def save_ports(ports: dict[str, str]) -> None:
-    PORTS_JSON.write_text(json.dumps(ports, indent=2), encoding="utf-8")
+    normalized = {key: str(ports.get(key, default)).strip() or default for key, default in DEFAULT_PORTS.items()}
+    PORTS_JSON.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
     lines = ["@echo off"]
-    lines.append(f'set "INDUSTRIAL_WEB_PORT={ports["industrial_web_port"]}"')
-    lines.append(f'set "API_STUDIO_PORT={ports["api_studio_port"]}"')
-    lines.append(f'set "PORTAL_PORT={ports["portal_port"]}"')
-    lines.append(f'set "OPCUA_PORT={ports["opcua_port"]}"')
-    lines.append(f'set "MQTT_BROKER_PORT={ports["mqtt_broker_port"]}"')
+    lines.append(f'set "INDUSTRIAL_WEB_PORT={normalized["industrial_web_port"]}"')
+    lines.append(f'set "PORTAL_PORT={normalized["portal_port"]}"')
+    lines.append(f'set "OPCUA_PORT={normalized["opcua_port"]}"')
+    lines.append(f'set "MQTT_BROKER_PORT={normalized["mqtt_broker_port"]}"')
     PORTS_BAT.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
 
 
 def validate_ports(ports: dict[str, str]) -> list[str]:
     errors = []
     seen = set()
-    for label, value in ports.items():
+    for label in DEFAULT_PORTS:
+        value = str(ports.get(label, "")).strip()
         try:
             port = int(value)
             if port < 1 or port > 65535:
@@ -194,7 +193,8 @@ def is_port_listening(port: int) -> bool:
 
 def port_conflicts(ports: dict[str, str]) -> list[str]:
     conflicts = []
-    for label, value in ports.items():
+    for label in DEFAULT_PORTS:
+        value = ports.get(label, DEFAULT_PORTS[label])
         try:
             port = int(value)
         except ValueError:
@@ -524,8 +524,6 @@ def env_for(ports: dict[str, str]) -> dict[str, str]:
     env = os.environ.copy()
     env["INDUSTRIAL_WEB_PORT"] = ports["industrial_web_port"]
     env["INDUSTRIAL_PORT"] = ports["industrial_web_port"]
-    env["API_STUDIO_PORT"] = ports["api_studio_port"]
-    env["PORT"] = ports["api_studio_port"]
     env["PORTAL_PORT"] = ports["portal_port"]
     env["OPCUA_PORT"] = ports["opcua_port"]
     env["MQTT_BROKER_PORT"] = ports["mqtt_broker_port"]
@@ -714,19 +712,16 @@ def start_services(
         env,
         tcp_port=int(ports["mqtt_broker_port"]),
     )
-    ok1 = start_service(
+    ok_industrial = start_service(
         "Industrial",
         [service_py, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", ports["industrial_web_port"]],
         ROOT / "industrial_simulator",
         env,
         health_url=f"http://127.0.0.1:{ports['industrial_web_port']}/api/health",
     )
-    # API Studio is legacy tooling. The portal is the supported user-facing
-    # surface, so do not start the API builder as part of the simulator suite.
-    ok2 = True
-    ok3 = True
+    ok_portal = True
     if include_portal:
-        ok3 = start_service(
+        ok_portal = start_service(
             "Portal",
             [service_py, "portal/portal_app.py"],
             ROOT,
@@ -735,8 +730,15 @@ def start_services(
         )
     if open_browser_flag:
         open_app_window(f"http://localhost:{ports['portal_port']}")
-    ok = bool(ok_mqtt and ok1 and ok2 and ok3)
-    emit_event("suite.start.completed" if ok else "suite.start.failed", "Suite start completed." if ok else "Suite start failed.", level="INFO" if ok else "ERROR", service="Suite", source="suite_runtime", fields={"mqtt_broker": ok_mqtt, "industrial": ok1, "api_studio": ok2, "portal": ok3, "ports": ports})
+    ok = bool(ok_mqtt and ok_industrial and ok_portal)
+    emit_event(
+        "suite.start.completed" if ok else "suite.start.failed",
+        "Suite start completed." if ok else "Suite start failed.",
+        level="INFO" if ok else "ERROR",
+        service="Suite",
+        source="suite_runtime",
+        fields={"mqtt_broker": ok_mqtt, "industrial": ok_industrial, "portal": ok_portal, "ports": ports},
+    )
     return ok, "Services started." if ok else "One or more services failed to start."
 
 
@@ -847,10 +849,9 @@ def status_payload(ports: dict[str, str]) -> dict:
         except Exception:
             flags[label] = False
     return {
-        "ports": ports,
-        "urls": urls_for(ports),
-        "status": {**flags, "api_studio": False},
-        "api_studio": {"disabled": True},
+        "ports": {key: str(ports.get(key, default)) for key, default in DEFAULT_PORTS.items()},
+        "urls": urls_for({key: str(ports.get(key, default)) for key, default in DEFAULT_PORTS.items()}),
+        "status": flags,
         "log": tail_log(),
     }
 
