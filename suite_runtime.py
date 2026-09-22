@@ -86,9 +86,15 @@ def run_hidden(
     wait: bool = False,
     timeout: int | None = None,
 ):
+    proc_env = env or os.environ.copy()
+    # Hermes/agent shells may inject PYTHONPATH/PYTHONHOME. The simulator owns a
+    # bundled runtime and per-suite venv, so child Python processes must not see
+    # the assistant's environment or they import incompatible packages.
+    proc_env.pop("PYTHONPATH", None)
+    proc_env.pop("PYTHONHOME", None)
     kwargs = {
         "cwd": str(cwd or ROOT),
-        "env": env or os.environ.copy(),
+        "env": proc_env,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
         "text": True,
@@ -522,6 +528,8 @@ def setup_environment() -> tuple[bool, str]:
 
 def env_for(ports: dict[str, str]) -> dict[str, str]:
     env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
     env["INDUSTRIAL_WEB_PORT"] = ports["industrial_web_port"]
     env["INDUSTRIAL_PORT"] = ports["industrial_web_port"]
     env["API_STUDIO_PORT"] = ports["api_studio_port"]

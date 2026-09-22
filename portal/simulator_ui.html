@@ -232,6 +232,13 @@ td{background:#fff}tr:hover td{background:#f7f9fc}.empty-cell,.empty-cell:before
 .view{height:100%;overflow:auto;padding:16px 18px 18px;scrollbar-gutter:stable}
 .grid,.g2,.g3,.g4,.overview-main{grid-template-columns:1fr!important}
 .card{width:100%}
+.command-bar{justify-content:space-between!important}
+.command-left{display:flex;align-items:center;gap:10px;min-width:0;font-weight:850;color:var(--ink)}
+.app-kicker{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:900;white-space:nowrap}.app-summary{font-size:12px;color:var(--muted);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}
+.view-header{background:#fff;border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin-bottom:14px;box-shadow:var(--shadow-deep);display:grid;gap:8px}.view-header h1{font-size:21px;line-height:1.1;letter-spacing:-.04em;color:var(--ink);margin:0}.view-header p{max-width:980px;color:var(--muted);font-size:13.5px;line-height:1.5;font-weight:650}.view-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;background:#f7f8fa;padding:5px 9px;font-size:11px;font-family:var(--mono);font-weight:850;color:var(--muted)}
+.guide-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.guide-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:var(--shadow-soft)}.guide-card .n{width:24px;height:24px;border-radius:50%;background:var(--infobg);color:var(--brand);display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:950;margin-bottom:9px}.guide-card h3{font-size:13.5px;color:var(--ink);margin-bottom:5px}.guide-card p{font-size:12.5px;color:var(--muted);line-height:1.45;font-weight:650}.control-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:9px;margin:12px 0}.field-help{display:block;color:var(--muted);font-size:11.5px;font-weight:650;line-height:1.35;margin-top:-2px}.form label{align-content:start}.form input,.form select,.form textarea{min-height:36px}.input-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.input-row input,.input-row select{flex:1 1 180px}.inline-note{border-left:3px solid var(--brand);background:#f7faff;padding:10px 12px;border-radius:7px;color:var(--muted);font-weight:650;line-height:1.5}.quick-nav{display:flex;gap:8px;flex-wrap:wrap}.quick-nav .btn{height:30px}
+@media(max-width:1100px){.guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.app-summary{display:none}}
+@media(max-width:640px){.guide-grid{grid-template-columns:1fr}.command-left{display:none}.view-header h1{font-size:18px}}
 @media(max-width:780px){.content{padding:0!important}.view{padding:12px}}
 
 </style>
@@ -255,10 +262,13 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       <button data-view="logs"><span class="nav-ico nav-logs"></span><span class="nav-label">Logs</span></button>
     </nav>
   <section class="command-bar" aria-label="Quick actions">
+    <div class="command-left"><span class="app-kicker">Simulator Suite</span><span class="app-summary">Generate plant data, replay it over OPC UA/MQTT/HTTP, and manage every job from one portal.</span></div>
     <div class="command-right"><span class="status-dot" id="commandDot"></span><span id="commandState">offline</span><span class="command-divider"></span><button class="btn small" id="pauseAllJobsBtn" title="Pause every active job across all tabs">Pause All Jobs</button><button class="btn small ok" id="resumeAllJobsBtn" title="Resume every paused job">Resume All Jobs</button><button class="btn small danger" id="stopAllJobsBtn" title="Stop every active job">Stop All Jobs</button><span class="command-divider"></span><button class="btn small ghost" id="refreshBtn">Refresh</button></div>
   </section>
   <main class="content">
       <section class="view active" id="view-overview">
+        <div class="view-header"><div><span class="pill">Operator cockpit</span></div><h1>Simulator control room</h1><p>Use this page as the single status surface. It shows service health, protocol readiness, generated datasets, live workload runs, source simulator jobs, and the API routes that back the portal.</p><div class="quick-nav"><button class="btn small primary" onclick="showView('generate')">Create data</button><button class="btn small" onclick="showView('replay')">Replay a dataset</button><button class="btn small" onclick="showView('jobs')">Manage jobs</button><button class="btn small" onclick="showView('streams')">Copy stream URLs</button></div></div>
+        <div class="guide-grid"><div class="guide-card"><div class="n">1</div><h3>Generate or register data</h3><p>Create synthetic plant data, upload small files, or register local CSV/Parquet folders.</p></div><div class="guide-card"><div class="n">2</div><h3>Replay over protocols</h3><p>Run one dataset over OPC UA, MQTT, both together, or HTTP pull/stream endpoints.</p></div><div class="guide-card"><div class="n">3</div><h3>Launch full workloads</h3><p>Combine replay, SAP PP, LIMS ODBC, and video jobs into one concurrent run.</p></div><div class="guide-card"><div class="n">4</div><h3>Observe and stop safely</h3><p>Use job controls, logs, and service health before changing ports or restarting services.</p></div></div>
         <div class="overview-shell">
           <div class="grid g3">
             <div class="card"><div class="card-h">Backend &amp; Replay</div><div class="card-b"><div class="table-wrap compact"><table id="statusBackendTable"></table></div></div></div>
@@ -277,6 +287,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-generate">
+        <div class="view-header"><div><span class="pill">Data factory</span></div><h1>Generate plant-scale datasets</h1><p>Choose a domain, scenario, target size, and output sink. Use quick presets for small smoke tests, realistic demos, or larger lakehouse/parquet runs.</p></div>
         <div class="toolbar" style="margin-bottom:14px">
           <button class="btn small subtab active" id="genSubtabFilesBtn" onclick="showGenerateSubtab('files')">Files</button>
           <button class="btn small subtab" id="genSubtabVideoBtn" onclick="showGenerateSubtab('video')">Video</button>
@@ -285,17 +296,18 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
           <div class="grid g2">
             <div class="card"><div class="card-h">Source And Target</div><div class="card-b">
               <div class="form two">
-                <label>Domain<select id="genDomain"></select></label>
-                <label>Scenario<select id="genScenario"></select></label>
-                <label>Name<input id="genName" value="Generated dataset"/></label>
-                <label>Output Method<select id="genOutput"><option value="csv">Small CSV</option><option value="parquet">Large Parquet dataset</option><option value="lakehouse">Local lakehouse output</option></select></label>
-                <label>Target Basis<select id="genTargetBasis"><option value="rows">Rows</option><option value="physical_bytes">Physical bytes</option><option value="logical_bytes">Logical bytes</option><option value="duration">Duration</option></select></label>
-                <label>Target Value<input id="genTargetValue" type="number" value="1000"/></label>
-                <label>Rows Per Part<input id="genRowsPerPart" type="number" value="1000000"/></label>
-                <label>Rows Per Batch<input id="genRowsPerBatch" type="number" value="10000"/></label>
-                <label>Compression<select id="genCompression"><option>zstd</option><option>snappy</option><option>none</option></select></label>
-                <label>Speed Mode<select id="genSpeed"><option value="max_throughput">Max throughput</option><option value="realistic_rate">Realistic rate</option></select></label>
+                <label>Domain<span class="field-help">Industrial process model to synthesize.</span><select id="genDomain"></select></label>
+                <label>Scenario<span class="field-help">Preset operating conditions for the selected domain.</span><select id="genScenario"></select></label>
+                <label>Name<span class="field-help">Human-readable dataset/job label.</span><input id="genName" value="Generated dataset"/></label>
+                <label>Output Method<span class="field-help">CSV for quick replay, Parquet/lakehouse for large volumes.</span><select id="genOutput"><option value="csv">Small CSV</option><option value="parquet">Large Parquet dataset</option><option value="lakehouse">Local lakehouse output</option></select></label>
+                <label>Target Basis<span class="field-help">How the generator decides when to stop.</span><select id="genTargetBasis"><option value="rows">Rows</option><option value="physical_bytes">Physical bytes</option><option value="logical_bytes">Logical bytes</option><option value="duration">Duration</option></select></label>
+                <label>Target Value<span class="field-help">Number of rows, bytes, or seconds based on target basis.</span><input id="genTargetValue" type="number" value="1000" min="1"/></label>
+                <label>Rows Per Part<span class="field-help">Parquet/lakehouse partition chunk size.</span><input id="genRowsPerPart" type="number" value="1000000" min="1"/></label>
+                <label>Rows Per Batch<span class="field-help">Write batch size. Smaller is safer; larger is faster.</span><input id="genRowsPerBatch" type="number" value="10000" min="1"/></label>
+                <label>Compression<span class="field-help">Use zstd for compact Parquet; none for easiest debugging.</span><select id="genCompression"><option>zstd</option><option>snappy</option><option>none</option></select></label>
+                <label>Speed Mode<span class="field-help">Throttle to realistic rate or write as fast as possible.</span><select id="genSpeed"><option value="max_throughput">Max throughput</option><option value="realistic_rate">Realistic rate</option></select></label>
               </div>
+              <div class="control-strip"><span class="pill">Presets</span><button class="btn small" type="button" onclick="applyGenerationPreset('smoke')">Smoke: 1k CSV</button><button class="btn small" type="button" onclick="applyGenerationPreset('demo')">Demo: 100k Parquet</button><button class="btn small" type="button" onclick="applyGenerationPreset('scale')">Scale: 1M Lakehouse</button></div>
               <div style="margin-top:12px" class="toolbar"><button class="btn primary" id="startGenerateJob">Start Generation Job</button><button class="btn" id="startSmallCsv">Generate Small CSV Now</button></div>
             </div></div>
             <div class="card"><div class="card-h">Generator Parameters</div><div class="card-b"><div class="form two" id="genParams"></div><div class="hint" id="genDesc" style="margin-top:10px"></div></div></div>
@@ -311,6 +323,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-datasets">
+        <div class="view-header"><div><span class="pill">Dataset library</span></div><h1>Bring data into the simulator</h1><p>Upload small CSV/XLSX files for quick tests, register existing local folders for large datasets, then preview and replay them without leaving the portal.</p></div>
         <div class="grid g2">
           <div class="card"><div class="card-h">Manual Data Input</div><div class="card-b">
             <div class="form">
@@ -329,6 +342,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-jobs">
+        <div class="view-header"><div><span class="pill">Run orchestration</span></div><h1>Build and control concurrent simulator runs</h1><p>Create a named run made of independent exports. Each export becomes a managed job with its own pause, resume, stop, progress, and inspection controls.</p></div>
         <div class="card" style="margin-bottom:14px"><div class="card-h">Concurrent Run Launcher</div><div class="card-b">
           <div class="hint" style="margin-bottom:10px">Pause All / Resume All / Stop All for every active job now live in the command bar above. Build any mix of independent exports below - e.g. one dataset over OPC UA, another over MQTT, a SAP PP feed, a LIMS ODBC feed, and a video job - each with its own settings, launched together as one run.</div>
           <label>Run Name<input id="workloadName" value="Concurrent simulator run"/></label>
@@ -348,6 +362,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-streams">
+        <div class="view-header"><div><span class="pill">Live protocols</span></div><h1>Consume simulator output streams</h1><p>Copy MQTT, OPC UA, NDJSON, SSE, and WebSocket settings for client applications. HTTP streams are pull-based; MQTT and OPC UA depend on active replay/source jobs.</p></div>
         <div class="grid g2">
           <div class="card"><div class="card-h">MQTT</div><div class="card-b"><div class="form two"><label>Host<input id="mqttHost" value="localhost"/></label><label>Port<input id="mqttPort" value="1883"/></label><label>Topic Prefix<input id="mqttTopic" value="industrial-tag-simulator"/></label><label>Payload Shape<select><option>wide row</option><option>narrow tag event</option><option>streampipes flat</option></select></label></div></div></div>
           <div class="card"><div class="card-h">OPC UA</div><div class="card-b"><div class="form two"><label>Endpoint<input id="opcEndpoint" readonly/></label><label>Namespace<input value="http://local/industrial-tag-simulator"/></label><label>Root Folder<input value="TagSimulator"/></label><label>Node Prefix<input value="TagSimulator"/></label></div></div></div>
@@ -358,6 +373,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-replay">
+        <div class="view-header"><div><span class="pill">Replay control</span></div><h1>Replay datasets over OPC UA and MQTT</h1><p>Select a replay-ready dataset, pick protocol and timing, then start a managed job. Use separate OPC UA/MQTT starts when you want independent job control.</p></div>
         <div class="card-stack">
           <div class="card"><div class="card-h">Dataset Streaming Control</div><div class="card-b"><div class="form two">
             <label>Dataset<select id="replayDataset"></select></label>
@@ -381,6 +397,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-lakehouse">
+        <div class="view-header"><div><span class="pill">Storage planning</span></div><h1>Write large outputs to local lakehouse folders</h1><p>Use partitioned Parquet output for larger generated data. Start with local folders before connecting downstream SQL or cloud ingestion.</p></div>
         <div class="grid g2">
           <div class="card"><div class="card-h">Local Lakehouse Output</div><div class="card-b"><div class="form two"><label>Lake Root<input id="lakeRoot" placeholder="Default: industrial_simulator/lakehouse"/></label><label>Partition Columns<input id="lakePartitions" value="event_date,hour"/></label><label>Rows Per Part<input id="lakeRowsPerPart" type="number" value="1000000"/></label><label>Compression<select id="lakeCompression"><option>zstd</option><option>snappy</option></select></label></div><div class="hint" style="margin-top:10px">Basic local partitioned Parquet output is available through generation jobs. Full stream ingestion utility is planned and does not block other paths.</div></div></div>
           <div class="card"><div class="card-h">Deferred Ingestor</div><div class="card-b"><div class="kv"><div><div class="k">Inputs</div><div class="v">MQTT, NDJSON, SSE, WebSocket, OPC UA later</div></div><div><div class="k">Outputs</div><div class="v">Local Parquet commits, SQL projection</div></div><div><div class="k">Status</div><div class="v"><span class="chip warn">planned</span></div></div><div><div class="k">Cloud</div><div class="v">ADLS/S3 deferred</div></div></div></div></div>
@@ -388,6 +405,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-sources">
+        <div class="view-header"><div><span class="pill">Enterprise source simulators</span></div><h1>Simulate SAP PP and LIMS polling sources</h1><p>Query source entities directly, inject latency/error hooks, or run polling jobs that feed the same job and stream surfaces as replay data.</p></div>
         <div class="source-layout">
           <div class="card"><div class="card-h">Source Catalog</div><div class="card-b"><div class="table-wrap"><table id="sourceCatalogTable"></table></div></div></div>
           <div class="card"><div class="card-h">SAP PP OData</div><div class="card-b">
@@ -422,6 +440,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-sql">
+        <div class="view-header"><div><span class="pill">SQL projection</span></div><h1>Project current simulator values to SQL Server</h1><p>Configure a target table, test credentials, and write the current tag snapshot when your SQL Server is reachable from this Windows machine.</p></div>
         <div class="grid g2">
           <div class="card"><div class="card-h">SQL Server Connection</div><div class="card-b"><div class="form two"><label>Server<input id="dbServer" value="localhost"/></label><label>Port<input id="dbPort" value="1433"/></label><label>Auth<select id="dbAuth"><option value="sql">SQL Login</option><option value="windows">Windows Auth</option></select></label><label>Database<select id="dbDatabase"><option>master</option></select></label><label>User<input id="dbUser" value="sa"/></label><label>Password<input id="dbPass" type="password"/></label><label>Table<select id="dbTable"><option>dbo.tag_snapshots</option></select></label><label><span>Options</span><span><input type="checkbox" id="dbTrust" checked/> Trust certificate</span></label></div><div class="toolbar" style="margin-top:12px"><button class="btn" id="testDbBtn">Test</button><button class="btn" id="loadDbsBtn">Load DBs</button><button class="btn" id="loadTablesBtn">Load Tables</button><button class="btn ok" id="writeCurrentBtn">Write Current Values</button></div></div></div>
           <div class="card"><div class="card-h">Projection Status</div><div class="card-b"><div class="pre" id="sqlResult">No SQL action yet.</div></div></div>
@@ -429,6 +448,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-settings">
+        <div class="view-header"><div><span class="pill">Service configuration</span></div><h1>Ports and lifecycle controls</h1><p>Change simulator ports only when necessary. Save ports first, then restart services from this page so the portal and backend agree on the same configuration.</p></div>
         <div class="grid g2">
           <div class="card"><div class="card-h">Service Control</div><div class="card-b"><div class="form two"><label>Industrial Port<input id="lpIndustrial" value="8000"/></label><label>Portal Port<input id="lpPortal" value="8001"/></label><label>OPC UA Port<input id="lpOpcua" value="4840"/></label><label>MQTT Port<input id="lpMqtt" value="1883"/></label></div><div class="toolbar" style="margin-top:12px"><button class="btn" id="savePorts">Save Ports</button><button class="btn ok" id="launchStart">Restart Services</button><button class="btn danger" id="launchStop">Stop Services</button></div><div class="hint" style="margin-top:10px">Restart first closes old Industrial, OPC UA, and MQTT processes bound to the configured ports, then starts a fresh suite while keeping this portal open.</div></div></div>
           <div class="card"><div class="card-h">Raw Status</div><div class="card-b"><div class="pre" id="rawStatus">{}</div></div></div>
@@ -436,6 +456,7 @@ window.SIMULATOR_LAUNCHER_CONFIG = window.SIMULATOR_LAUNCHER_CONFIG || {};
       </section>
 
       <section class="view" id="view-logs">
+        <div class="view-header"><div><span class="pill">Diagnostics</span></div><h1>Structured service logs</h1><p>Use logs to verify startup, API requests, job lifecycle events, and protocol errors. Inspect rows for full JSON details.</p></div>
         <div class="card"><div class="card-h">Structured Logs <button class="btn small" id="refreshLogsBtn">Refresh</button></div><div class="card-b"><div class="table-wrap"><table id="logsTable"></table></div><div class="pre" id="logDetail" style="margin-top:12px">Select a log row.</div></div></div>
       </section>
     </main>
@@ -550,6 +571,17 @@ $('genDomain').onchange=e=>loadSpec(e.target.value);
 document.addEventListener('input',e=>{if(e.target.closest('#view-generate'))renderGenerateReview()});
 function genParams(){const out={}; document.querySelectorAll('[data-param]').forEach(el=>out[el.dataset.param]=el.type==='number'?Number(el.value):el.value); return out}
 function genJobPayload(){return {scenario:$('genScenario').value,name:$('genName').value,output_format:$('genOutput').value,parameters:genParams(),target_basis:$('genTargetBasis').value,target_value:Number($('genTargetValue').value||0),speed_mode:$('genSpeed').value,rows_per_batch:Number($('genRowsPerBatch').value||10000),rows_per_part:Number($('genRowsPerPart').value||1000000),compression:$('genCompression').value,lakehouse_root:$('lakeRoot')?.value||null,output_sinks:[$('genOutput').value]}}
+function applyGenerationPreset(kind){
+  const presets={
+    smoke:{name:'Smoke test dataset',output:'csv',basis:'rows',target:1000,batch:1000,part:100000,compression:'none',speed:'max_throughput'},
+    demo:{name:'Demo parquet dataset',output:'parquet',basis:'rows',target:100000,batch:10000,part:250000,compression:'zstd',speed:'max_throughput'},
+    scale:{name:'Scale lakehouse dataset',output:'lakehouse',basis:'rows',target:1000000,batch:50000,part:500000,compression:'zstd',speed:'max_throughput'}
+  };
+  const p=presets[kind]||presets.smoke;
+  $('genName').value=p.name;$('genOutput').value=p.output;$('genTargetBasis').value=p.basis;$('genTargetValue').value=p.target;$('genRowsPerBatch').value=p.batch;$('genRowsPerPart').value=p.part;$('genCompression').value=p.compression;$('genSpeed').value=p.speed;
+  renderGenerateReview();
+  msg(`Applied ${kind} generation preset`,'ok');
+}
 function renderGenerateReview(){$('generateReview').textContent=JSON.stringify(genJobPayload(),null,2)}
 $('startGenerateJob').onclick=async()=>{try{const d=await api(`/api/generators/${$('genDomain').value}/generate-job`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(genJobPayload())}); msg(`Job ${d.job_id} created`,'ok'); await loadJobs(); showView('jobs')}catch(e){msg(e.message,'bad')}};
 $('startSmallCsv').onclick=async()=>{try{const payload={scenario:$('genScenario').value,output_filename:`${$('genDomain').value}_${Date.now()}.csv`,parameters:genParams()}; const d=await api(`/api/generators/${$('genDomain').value}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); msg(`Generated ${d.filename}`,'ok'); await loadDatasets()}catch(e){msg(e.message,'bad')}};

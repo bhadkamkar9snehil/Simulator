@@ -31,5 +31,5 @@ if errorlevel 1 (
 start "" "%BUNDLED_PYW%" "%CD%\suite_runtime.py" start-hidden
 echo Simulator launch requested.
 echo Portal will open automatically when the services are ready.
-timeout /t 2 /nobreak >nul
+"%SystemRoot%\System32\ping.exe" -n 3 127.0.0.1 >nul
 exit /b 0
