@@ -1038,6 +1038,7 @@ def dynamic_api_v1(dynamic_path: str) -> Response:
 
 
 @app.route("/mock/<path:dynamic_path>", methods=HTTP_METHODS)
+@app.route("/http/<path:dynamic_path>", methods=HTTP_METHODS)
 def dynamic_mock(dynamic_path: str) -> Response:
     return handle_dynamic_request()
 

@@ -14,12 +14,14 @@
 
 ## Architecture
 
-Three services, started together by `suite_runtime.py`:
+Normal startup uses `suite_runtime.py` to start Industrial and Portal plus the
+internal MQTT broker. Legacy API Studio is disabled by default and can be
+started explicitly for integration work; do not silently enable it in suite startup.
 
 | Service | Port | Role |
 |---|---|---|
 | `industrial_simulator` | 8000 | Tag data replay — reads CSV, publishes over MQTT + OPC UA |
-| `api_studio` | 5050 | REST API — simulator control and data access |
+| `api_studio` | 5050 | Configurable API fixtures; opt-in runtime, including `api_studio/projects/lmel_sap.json` |
 | `portal` | 8001 | Web UI — the ONLY user-facing surface |
 
 `suite_runtime.py` orchestrates startup, port assignment, environment setup, and health checks.

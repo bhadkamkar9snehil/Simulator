@@ -40,6 +40,11 @@ What `RUN_SIMULATOR.bat` does:
 
 ## Architecture
 
+For the owner-supplied LMEL SAP workbook contracts, use the existing API Studio
+[LMEL project package and HTTP verification](api_studio/projects/README.md).
+This is an explicit integration-test runtime; the normal suite startup policy
+above remains unchanged.
+
 | Service | Port | Role |
 |---|---|---|
 | `industrial_simulator` | 8000 | All simulation logic — generation, replay, jobs, streaming, source simulators, video |
